@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import Notes from '@/components/InstagramNotes';
 import { portfolioConfig } from '@/config/portfolio';
 
@@ -8,7 +7,7 @@ const experiences = [
     company: 'Meta',
     period: '2024 - Present',
     description:
-      'Working on enabling the server IG Notes and other narrow-casting Sharing features',
+      'Working on enabling and improving server support for IG Notes and other narrow-casting Sharing features',
     featured: true,
     showDemo: portfolioConfig.experience.showNotesDemo,
   },
@@ -17,7 +16,7 @@ const experiences = [
     company: 'Meta',
     period: '2023 - 2024',
     description:
-      'keeping IG safe (comments, links, compliance, and more',
+      'keeping IG safe (comments, links, compliance, and more)',
   },
   {
     title: 'VR Identity',
@@ -29,7 +28,6 @@ const experiences = [
 ];
 
 const Experience = () => {
-  const [showDemo] = useState(portfolioConfig.experience.showNotesDemo);
 
   return (
     <main className="experience-page min-h-screen bg-amber-50 overflow-hidden">

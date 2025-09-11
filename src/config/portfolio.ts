@@ -18,6 +18,6 @@ export const portfolioConfig: PortfolioConfig = {
     contact: true,
   },
   experience: {
-    showNotesDemo: true,
+    showNotesDemo: false,
   },
 };
