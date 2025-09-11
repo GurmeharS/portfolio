@@ -2,7 +2,7 @@ import { Link, NavLink } from "react-router-dom";
 
 const Nav = () => {
   return (
-    <header className="nav fixed inset-x-0 bottom-0 z-50 bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/50 border-t border-border">
+    <header className="nav fixed inset-x-0 bottom-0 z-50 backdrop-blur bg-amber-50 border-t border-border">
       <div className="container mx-auto px-4 h-14 flex items-center justify-between">
         <Link to="/" className="nav__brand text-sm font-semibold tracking-wide lowercase">
           gurmehar sandhu
