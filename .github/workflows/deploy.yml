@@ -34,6 +34,11 @@ jobs:
       - name: Build
         run: npm run build
         
+      - name: Add CNAME and 404.html
+        run: |
+          echo "gurmehar.ca" > dist/CNAME
+          cp dist/404.html dist/404.html || echo "404.html already exists"
+        
       - name: Setup Pages
         uses: actions/configure-pages@v4
         
