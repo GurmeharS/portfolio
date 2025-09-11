@@ -7,6 +7,8 @@ const useTypingAnimation = (texts: string[], typingSpeed: number = 100, deleting
   const [isPaused, setIsPaused] = useState(false);
 
   useEffect(() => {
+    if (texts.length === 0) return;
+    
     const timeout = setTimeout(() => {
       if (isPaused) {
         setIsPaused(false);
@@ -17,6 +19,7 @@ const useTypingAnimation = (texts: string[], typingSpeed: number = 100, deleting
         if (nextFullText.startsWith(currentText)) {
           // Just add characters, don't delete
           setIsDeleting(false);
+          setCurrentTextIndex(nextTextIndex);
         } else {
           // Need to delete characters
           setIsDeleting(true);
@@ -45,7 +48,7 @@ const useTypingAnimation = (texts: string[], typingSpeed: number = 100, deleting
             // Stop deleting and switch to typing
             setCurrentText(potentialText);
             setIsDeleting(false);
-            setCurrentTextIndex((prevIndex) => (prevIndex + 1) % texts.length);
+            setCurrentTextIndex(nextTextIndex);
           } else {
             // Continue deleting
             setCurrentText(potentialText);
@@ -53,7 +56,7 @@ const useTypingAnimation = (texts: string[], typingSpeed: number = 100, deleting
         } else {
           // Finished deleting, move to next text
           setIsDeleting(false);
-          setCurrentTextIndex((prevIndex) => (prevIndex + 1) % texts.length);
+          setCurrentTextIndex(nextTextIndex);
         }
       }
     }, isPaused ? pauseTime : (isDeleting ? deletingSpeed : typingSpeed));
