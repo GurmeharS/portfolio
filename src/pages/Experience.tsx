@@ -7,7 +7,7 @@ const experiences = [
     company: 'Meta',
     period: '2024 - Present',
     description:
-      'Working on IG+ (consumer subscription) — new premium features for closer friends. Working on enabling and improving server support for IG Notes and other narrow-casting Friends features',
+      'Currently building and growing IG+ — new premium features on Instagram. Previously focused on enabling and improving server support for IG Notes and other narrow-casting Friends features',
     featured: true,
     showDemo: portfolioConfig.experience.showNotesDemo,
   },
