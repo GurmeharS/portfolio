@@ -3,11 +3,11 @@ import { portfolioConfig } from '@/config/portfolio';
 
 const experiences = [
   {
-    title: 'Instagram Sharing',
+    title: 'Instagram Friends',
     company: 'Meta',
     period: '2024 - Present',
     description:
-      'Working on enabling and improving server support for IG Notes and other narrow-casting Sharing features',
+      'Working on IG+ (consumer subscription) — new premium features for closer friends. Working on enabling and improving server support for IG Notes and other narrow-casting Friends features',
     featured: true,
     showDemo: portfolioConfig.experience.showNotesDemo,
   },
@@ -57,5 +57,3 @@ const Experience = () => {
 };
 
 export default Experience;
-
-
