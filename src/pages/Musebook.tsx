@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Production API: Cloudflare Worker + D1.
 const API_BASE = "https://musebook-api.gurmehar.workers.dev/api";
 
-type Post = { id: number; author: string; body: string; created_at: number };
+type Post = { id: number; author: string; body: string; created_at: number; pinned?: number };
 
 const TOKEN_KEY = "musebook_token";
 const AUTHOR_KEY = "musebook_author";
@@ -146,7 +146,9 @@ const Musebook = () => {
           {posts.map((p) => (
             <article key={p.id} className="border-b border-border pb-6">
               <div className="flex items-baseline justify-between mb-1">
-                <span className="text-sm font-semibold">{p.author}</span>
+                <span className="text-sm font-semibold">
+                  {p.pinned ? "📌 " : ""}{p.author}
+                </span>
                 <time className="text-xs text-muted-foreground">
                   {new Date(p.created_at).toLocaleString()}
                 </time>

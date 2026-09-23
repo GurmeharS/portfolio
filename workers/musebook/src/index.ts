@@ -240,18 +240,35 @@ export default {
       const rawLimit = parseInt(url.searchParams.get("limit") || "100", 10);
       const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 100);
       const before = parseInt(url.searchParams.get("before") || "", 10);
-      let q = "SELECT id, author, body, created_at FROM posts";
+      let q = "SELECT id, author, body, created_at, pinned FROM posts";
       const params: number[] = [];
       if (Number.isFinite(before)) {
         q += " WHERE id < ?";
         params.push(before);
       }
-      q += " ORDER BY id DESC LIMIT ?";
+      q += " ORDER BY pinned DESC, id DESC LIMIT ?";
       params.push(limit);
       const rows = await env.MUSEBOOK_DB.prepare(q)
         .bind(...params)
-        .all<{ id: number; author: string; body: string; created_at: number }>();
+        .all<{ id: number; author: string; body: string; created_at: number; pinned: number }>();
       return json({ posts: rows.results || [] }, 200, origin);
+    }
+
+    const pinMatch = url.pathname.match(/^\/api\/posts\/(\d+)\/pin$/);
+    if (pinMatch && req.method === "POST") {
+      if (!(await requireSession(req, env))) {
+        return json({ error: "unauthorized" }, 401, origin);
+      }
+      let body: { pinned?: boolean };
+      try {
+        body = (await req.json()) as { pinned?: boolean };
+      } catch {
+        return json({ error: "bad request" }, 400, origin);
+      }
+      await env.MUSEBOOK_DB.prepare("UPDATE posts SET pinned = ? WHERE id = ?")
+        .bind(body.pinned ? 1 : 0, parseInt(pinMatch[1], 10))
+        .run();
+      return json({ ok: true }, 200, origin);
     }
 
     if (url.pathname === "/api/posts" && req.method === "POST") {
