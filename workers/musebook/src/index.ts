@@ -8,10 +8,39 @@ const SESSION_DAYS = 30;
 const MAX_AUTHOR = 40;
 const MAX_BODY = 5000;
 const UNLOCK_WINDOW_MS = 10 * 60 * 1000;
-const UNLOCK_MAX_ATTEMPTS = 20;
+const UNLOCK_MAX_ATTEMPTS_PER_IP = 20;
+const UNLOCK_MAX_ATTEMPTS_GLOBAL = 200;
 
-// best-effort per-isolate throttle for the unlock endpoint
-const attempts = new Map<string, { count: number; reset: number }>();
+// D1-backed throttle for the unlock endpoint. Per-isolate in-memory counters
+// are bypassable (requests fan out across many isolates), so budgets live in
+// the database: one per client IP plus a shared global budget.
+async function unlockAllowed(db: D1Database, ip: string): Promise<boolean> {
+  const now = Date.now();
+  const windowEnd = now + UNLOCK_WINDOW_MS;
+  const upsert =
+    "INSERT INTO unlock_limits(key, count, reset) VALUES (?, 1, ?) " +
+    "ON CONFLICT(key) DO UPDATE SET " +
+    "count = CASE WHEN unlock_limits.reset < ? THEN 1 ELSE unlock_limits.count + 1 END, " +
+    "reset = CASE WHEN unlock_limits.reset < ? THEN ? ELSE unlock_limits.reset END " +
+    "RETURNING count";
+  try {
+    const results = await db.batch([
+      db.prepare(upsert).bind("ip:" + ip, windowEnd, now, now, windowEnd),
+      db.prepare(upsert).bind("forum", windowEnd, now, now, windowEnd),
+    ]);
+    const countOf = (i: number): number => {
+      const rows = results[i].results as unknown[] | undefined;
+      const first = rows && (rows[0] as { count?: number } | undefined);
+      return typeof first?.count === "number" ? first.count : 0;
+    };
+    return (
+      countOf(0) <= UNLOCK_MAX_ATTEMPTS_PER_IP &&
+      countOf(1) <= UNLOCK_MAX_ATTEMPTS_GLOBAL
+    );
+  } catch {
+    return false; // fail closed on DB errors
+  }
+}
 
 function corsHeaders(origin: string | null): HeadersInit {
   const allow =
@@ -56,17 +85,6 @@ function clientIp(req: Request): string {
   return req.headers.get("CF-Connecting-IP") || "unknown";
 }
 
-function throttled(ip: string): boolean {
-  const now = Date.now();
-  const rec = attempts.get(ip);
-  if (!rec || now > rec.reset) {
-    attempts.set(ip, { count: 1, reset: now + UNLOCK_WINDOW_MS });
-    return false;
-  }
-  rec.count += 1;
-  return rec.count > UNLOCK_MAX_ATTEMPTS;
-}
-
 async function requireSession(req: Request, env: Env): Promise<boolean> {
   const auth = req.headers.get("Authorization") || "";
   const match = /^Bearer (.+)$/.exec(auth);
@@ -99,7 +117,7 @@ export default {
     }
 
     if (url.pathname === "/api/unlock" && req.method === "POST") {
-      if (throttled(clientIp(req))) {
+      if (!(await unlockAllowed(env.MUSEBOOK_DB, clientIp(req)))) {
         return json({ error: "too many attempts, slow down" }, 429, origin);
       }
       let body: { passcode?: string };
