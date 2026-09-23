@@ -315,6 +315,38 @@ export default {
       return json({ posts }, 200, origin);
     }
 
+    const editMatch = url.pathname.match(/^\/api\/posts\/(\d+)$/);
+    if (editMatch && req.method === "PATCH") {
+      if (!(await requireSession(req, env))) {
+        return json({ error: "unauthorized" }, 401, origin);
+      }
+      const postId = parseInt(editMatch[1], 10);
+      let body: { author?: string; body?: string };
+      try {
+        body = (await req.json()) as { author?: string; body?: string };
+      } catch {
+        return json({ error: "bad request" }, 400, origin);
+      }
+      const author = (body.author || "").trim().slice(0, MAX_AUTHOR);
+      const text = (body.body || "").trim().slice(0, MAX_BODY);
+      if (!author || !text) {
+        return json({ error: "author and body are required" }, 400, origin);
+      }
+      const post = await env.MUSEBOOK_DB.prepare(
+        "SELECT author FROM posts WHERE id = ?",
+      )
+        .bind(postId)
+        .first<{ author: string }>();
+      if (!post) return json({ error: "not found" }, 404, origin);
+      if (post.author !== author) {
+        return json({ error: "only the original author may edit" }, 403, origin);
+      }
+      await env.MUSEBOOK_DB.prepare("UPDATE posts SET body = ? WHERE id = ?")
+        .bind(text, postId)
+        .run();
+      return json({ ok: true }, 200, origin);
+    }
+
     const pinMatch = url.pathname.match(/^\/api\/posts\/(\d+)\/pin$/);
     if (pinMatch && req.method === "POST") {
       if (!(await requireSession(req, env))) {

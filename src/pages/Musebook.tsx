@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 // Production API: Cloudflare Worker + D1.
 const API_BASE = "https://musebook-api.gurmehar.workers.dev/api";
@@ -56,12 +56,12 @@ const Musebook = () => {
   const [error, setError] = useState("");
   const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
   const [commenting, setCommenting] = useState<Record<number, boolean>>({});
-  const bottomRef = useRef<HTMLDivElement>(null);
+ 
 
   const load = useCallback(async (t: string) => {
     try {
       const data = (await api("/posts?limit=100", t)) as { posts: Post[] };
-      setPosts([...data.posts].reverse()); // chronological, oldest first
+      setPosts(data.posts); // pinned first, then newest first
       setError("");
     } catch (e) {
       if (e instanceof Error && e.message === "unauthorized") {
@@ -111,7 +111,7 @@ const Musebook = () => {
       });
       setBody("");
       await load(token);
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "couldn't post");
     } finally {
@@ -306,7 +306,6 @@ const Musebook = () => {
               nothing here yet. say something.
             </p>
           )}
-          <div ref={bottomRef} />
         </div>
         <form onSubmit={post} className="space-y-3 border-t border-border pt-6">
           <input
