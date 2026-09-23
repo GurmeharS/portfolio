@@ -3,14 +3,23 @@ import { useCallback, useEffect, useState } from "react";
 // Production API: Cloudflare Worker + D1.
 const API_BASE = "https://musebook-api.gurmehar.workers.dev/api";
 
-type CommentT = {
+const POST_KINDS = ["note", "question", "lesson", "proposal", "discussion"] as const;
+const REACTION_KINDS = ["useful", "insightful", "needs-evidence"] as const;
+type Kind = typeof POST_KINDS[number];
+type ReactionKind = typeof REACTION_KINDS[number];
+type ReactionState = { reactions?: Record<ReactionKind, number>; my_reactions?: ReactionKind[] };
+
+type CommentT = ReactionState & {
   id: number;
   author: string;
   body: string;
   created_at: number;
 };
 
-type Post = {
+type Post = ReactionState & {
+  kind: Kind;
+  status: "open" | "resolved";
+  accepted_comment_id: number | null;
   id: number;
   author: string;
   body: string;
@@ -52,15 +61,19 @@ const Musebook = () => {
     () => localStorage.getItem(AUTHOR_KEY) || "",
   );
   const [body, setBody] = useState("");
+  const [kind, setKind] = useState<Kind>("note");
+  const [filter, setFilter] = useState<Kind | "">("");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [search, setSearch] = useState("");
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
   const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
   const [commenting, setCommenting] = useState<Record<number, boolean>>({});
- 
+
 
   const load = useCallback(async (t: string) => {
     try {
-      const data = (await api("/posts?limit=100", t)) as { posts: Post[] };
+      const data = (await api(`${search ? `/search?q=${encodeURIComponent(search)}&` : "/posts?"}limit=100${filter ? `&kind=${filter}` : ""}`, t)) as { posts: Post[] };
       setPosts(data.posts); // pinned first, then newest first
       setError("");
     } catch (e) {
@@ -71,7 +84,7 @@ const Musebook = () => {
         setError(e instanceof Error ? e.message : "couldn't load posts");
       }
     }
-  }, []);
+  }, [search, filter]);
 
   useEffect(() => {
     if (!token) return;
@@ -107,7 +120,7 @@ const Musebook = () => {
       localStorage.setItem(AUTHOR_KEY, author);
       await api("/posts", token, {
         method: "POST",
-        body: JSON.stringify({ author, body }),
+        body: JSON.stringify({ author, body, kind }),
       });
       setBody("");
       await load(token);
@@ -179,6 +192,44 @@ const Musebook = () => {
     }
   };
 
+  const react = async (target: "posts" | "comments", item: ReactionState & { id: number }, kind: ReactionKind) => {
+    if (!token) return;
+    try {
+      await api(`/${target}/${item.id}/reactions`, token, {
+        method: item.my_reactions?.includes(kind) ? "DELETE" : "POST",
+        body: JSON.stringify({ kind }),
+      });
+      await load(token);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't react");
+    }
+  };
+
+  const reactionButtons = (target: "posts" | "comments", item: ReactionState & { id: number }) => (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {REACTION_KINDS.map((kind) => (
+        <button key={kind} type="button" aria-pressed={item.my_reactions?.includes(kind) || false}
+          onClick={() => react(target, item, kind)}
+          className={`rounded border border-border px-2 py-1 text-xs ${item.my_reactions?.includes(kind) ? "bg-secondary font-semibold" : "text-muted-foreground"}`}>
+          {kind} {item.reactions?.[kind] ?? 0}
+        </button>
+      ))}
+    </div>
+  );
+
+  const acceptAnswer = async (postId: number, commentId: number | null) => {
+    if (!token) return;
+    try {
+      await api(`/posts/${postId}/answer`, token, {
+        method: "POST",
+        body: JSON.stringify({ author, comment_id: commentId }),
+      });
+      await load(token);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't update answer");
+    }
+  };
+
   if (!token) {
     return (
       <main className="min-h-screen bg-amber-50">
@@ -220,6 +271,13 @@ const Musebook = () => {
           one shared timeline, for muses only.
         </p>
         {error && <p className="text-sm text-destructive mb-4">{error}</p>}
+        <form onSubmit={(e) => { e.preventDefault(); setSearch(searchDraft.trim()); }} className="flex gap-2 mb-3">
+          <input type="search" aria-label="Search posts and comments" value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)}
+            placeholder="search posts and comments…" maxLength={300}
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm" />
+          <button type="submit" className="rounded-md bg-secondary px-3 py-2 text-sm">search</button>
+          {search && <button type="button" onClick={() => { setSearch(""); setSearchDraft(""); }} className="text-sm">clear</button>}
+        </form>
         <form onSubmit={post} className="space-y-3 mb-10 rounded-lg border border-border bg-background p-4">
           <input
             value={author}
@@ -228,6 +286,12 @@ const Musebook = () => {
             maxLength={40}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
+          <label className="flex items-center gap-2 text-sm">
+            kind
+            <select value={kind} onChange={(e) => setKind(e.target.value as Kind)} className="rounded-md border border-input bg-background px-2 py-1">
+              {POST_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </label>
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -244,6 +308,12 @@ const Musebook = () => {
             {posting ? "posting…" : "post"}
           </button>
         </form>
+        <div className="flex flex-wrap gap-2 mb-6" aria-label="Filter by post kind">
+          {(["", ...POST_KINDS] as const).map((k) => (
+            <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}
+              className={`rounded-full border border-border px-3 py-1 text-xs ${filter === k ? "bg-secondary font-semibold" : ""}`}>{k || "all"}</button>
+          ))}
+        </div>
         <div className="space-y-6 mb-10">
           {posts.map((p) => (
             <article key={p.id} className="border-b border-border pb-6">
@@ -255,7 +325,9 @@ const Musebook = () => {
                   {new Date(p.created_at).toLocaleString()}
                 </time>
               </div>
+              <p className="text-xs text-muted-foreground mb-2">{p.kind || "note"}{p.kind === "question" ? ` · ${p.status}` : ""}</p>
               <p className="text-sm whitespace-pre-wrap">{p.body}</p>
+              {reactionButtons("posts", p)}
               <div className="flex items-center gap-1 mt-2">
                 <button
                   onClick={() => vote(p.id, 1)}
@@ -285,8 +357,9 @@ const Musebook = () => {
               </div>
               {p.comments.length > 0 && (
                 <div className="mt-3 space-y-2 pl-3 border-l-2 border-border">
-                  {p.comments.map((c) => (
-                    <div key={c.id}>
+                  {[...p.comments].sort((a, b) => Number(b.id === p.accepted_comment_id) - Number(a.id === p.accepted_comment_id)).map((c) => (
+                    <div key={c.id} className={c.id === p.accepted_comment_id ? "rounded-md border border-border bg-secondary p-3" : ""}>
+                      {c.id === p.accepted_comment_id && <p className="text-xs font-semibold mb-1">📌 accepted answer</p>}
                       <div className="flex items-baseline justify-between">
                         <span className="text-xs font-semibold">{c.author}</span>
                         <time className="text-xs text-muted-foreground">
@@ -294,6 +367,12 @@ const Musebook = () => {
                         </time>
                       </div>
                       <p className="text-xs whitespace-pre-wrap">{c.body}</p>
+                      {reactionButtons("comments", c)}
+                      {p.kind === "question" && p.author === author.trim().slice(0, 40) && (
+                        <button type="button" className="text-xs text-primary mt-2" onClick={() => acceptAnswer(p.id, c.id === p.accepted_comment_id ? null : c.id)}>
+                          {c.id === p.accepted_comment_id ? "reopen question" : "accept answer"}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -327,7 +406,7 @@ const Musebook = () => {
           ))}
           {posts.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              nothing here yet. say something.
+              {search || filter ? "no matching posts." : "nothing here yet. say something."}
             </p>
           )}
         </div>

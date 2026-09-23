@@ -66,7 +66,7 @@ function corsHeaders(origin: string | null): HeadersInit {
     origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allow,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -134,6 +134,22 @@ async function requireSession(req: Request, env: Env): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+const POST_KINDS = ["question", "lesson", "proposal", "discussion", "note"];
+const REACTION_KINDS = ["useful", "insightful", "needs-evidence"];
+
+async function reactions(db: D1Database, target: string, id: number, voter: string | null) {
+  const rows = await db.prepare(
+    "SELECT kind, COUNT(*) AS count, MAX(CASE WHEN voter = ? THEN 1 ELSE 0 END) AS mine FROM reactions WHERE target_type = ? AND target_id = ? GROUP BY kind",
+  ).bind(voter, target, id).all<{ kind: string; count: number; mine: number }>();
+  const counts: Record<string, number> = { useful: 0, insightful: 0, "needs-evidence": 0 };
+  const mine: string[] = [];
+  for (const row of rows.results || []) {
+    counts[row.kind] = row.count;
+    if (row.mine) mine.push(row.kind);
+  }
+  return { reactions: counts, my_reactions: mine };
 }
 
 export default {
@@ -243,20 +259,35 @@ export default {
       return json({ token }, 200, origin);
     }
 
-    if (url.pathname === "/api/posts" && req.method === "GET") {
+    if ((url.pathname === "/api/posts" || url.pathname === "/api/search") && req.method === "GET") {
       if (!(await requireSession(req, env))) {
         return json({ error: "unauthorized" }, 401, origin);
       }
       const rawLimit = parseInt(url.searchParams.get("limit") || "100", 10);
       const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 100);
       const before = parseInt(url.searchParams.get("before") || "", 10);
-      let q = "SELECT id, author, body, created_at, pinned FROM posts";
-      const params: number[] = [];
+      const search = url.pathname === "/api/search";
+      const terms = (url.searchParams.get("q") || "").trim().slice(0, 300).match(/[\p{L}\p{N}_]+/gu) || [];
+      if (search && terms.length === 0) return json({ posts: [] }, 200, origin);
+      const kind = url.searchParams.get("kind");
+      if (kind && !POST_KINDS.includes(kind)) return json({ error: "invalid kind" }, 400, origin);
+      let q = "SELECT id, author, body, created_at, pinned, COALESCE(kind, 'note') AS kind, COALESCE(status, 'open') AS status, accepted_comment_id FROM posts";
+      const params: (number | string)[] = [];
+      const conditions: string[] = [];
+      if (search) {
+        conditions.push("id IN (SELECT post_id FROM search_fts WHERE search_fts MATCH ?)");
+        params.push(terms.map((term) => '"' + term + '"').join(" AND "));
+      }
+      if (kind) {
+        conditions.push("COALESCE(kind, 'note') = ?");
+        params.push(kind);
+      }
       if (Number.isFinite(before)) {
-        q += " WHERE id < ?";
+        conditions.push("id < ?");
         params.push(before);
       }
-      q += " ORDER BY pinned DESC, id DESC LIMIT ?";
+      if (conditions.length) q += " WHERE " + conditions.join(" AND ");
+      q += search ? " ORDER BY created_at DESC, id DESC LIMIT ?" : " ORDER BY pinned DESC, id DESC LIMIT ?";
       params.push(limit);
       const rows = await env.MUSEBOOK_DB.prepare(q)
         .bind(...params)
@@ -306,13 +337,73 @@ export default {
           });
         }
       }
+      const reactionStates: Record<string, { reactions: Record<string, number>; my_reactions: string[] }> = {};
+      const emptyReactions = () => ({ reactions: { useful: 0, insightful: 0, "needs-evidence": 0 }, my_reactions: [] as string[] });
+      if (ids.length) {
+        const selectedIds = JSON.stringify(ids);
+        const reactionRows = await env.MUSEBOOK_DB.prepare(
+          "SELECT target_type, target_id, kind, COUNT(*) AS count, MAX(CASE WHEN voter = ? THEN 1 ELSE 0 END) AS mine FROM reactions " +
+          "WHERE (target_type = 'posts' AND target_id IN (SELECT value FROM json_each(?))) " +
+          "OR (target_type = 'comments' AND target_id IN (SELECT id FROM comments WHERE post_id IN (SELECT value FROM json_each(?)))) " +
+          "GROUP BY target_type, target_id, kind",
+        ).bind(await voterHash(req), selectedIds, selectedIds).all<{ target_type: string; target_id: number; kind: string; count: number; mine: number }>();
+        for (const row of reactionRows.results || []) {
+          const state = reactionStates[`${row.target_type}:${row.target_id}`] ||= emptyReactions();
+          state.reactions[row.kind] = row.count;
+          if (row.mine) state.my_reactions.push(row.kind);
+        }
+      }
       const posts = list.map((p) => ({
         ...p,
         score: scores[p.id] ?? 0,
         my_vote: myVotes[p.id] ?? 0,
-        comments: commentsByPost[p.id] ?? [],
+        ...(reactionStates[`posts:${p.id}`] ?? emptyReactions()),
+        comments: (commentsByPost[p.id] ?? []).map((c) => ({
+          ...c, ...(reactionStates[`comments:${c.id}`] ?? emptyReactions()),
+        })),
       }));
       return json({ posts }, 200, origin);
+    }
+
+    const reactionMatch = url.pathname.match(/^\/api\/(posts|comments)\/(\d+)\/reactions$/);
+    if (reactionMatch && (req.method === "POST" || req.method === "DELETE")) {
+      if (!(await requireSession(req, env))) return json({ error: "unauthorized" }, 401, origin);
+      let body: { kind?: string };
+      try { body = await req.json(); } catch { return json({ error: "bad request" }, 400, origin); }
+      if (!body || !REACTION_KINDS.includes(body.kind || "")) return json({ error: "invalid kind" }, 400, origin);
+      const target = reactionMatch[1];
+      const id = Number(reactionMatch[2]);
+      const exists = await env.MUSEBOOK_DB.prepare(`SELECT id FROM ${target} WHERE id = ?`).bind(id).first();
+      if (!exists) return json({ error: "not found" }, 404, origin);
+      const vh = await voterHash(req);
+      if (req.method === "POST") {
+        await env.MUSEBOOK_DB.prepare("INSERT OR IGNORE INTO reactions (target_type, target_id, voter, kind) VALUES (?, ?, ?, ?)").bind(target, id, vh, body.kind).run();
+      } else {
+        await env.MUSEBOOK_DB.prepare("DELETE FROM reactions WHERE target_type = ? AND target_id = ? AND voter = ? AND kind = ?").bind(target, id, vh, body.kind).run();
+      }
+      return json(await reactions(env.MUSEBOOK_DB, target, id, vh), 200, origin);
+    }
+
+    const answerMatch = url.pathname.match(/^\/api\/posts\/(\d+)\/answer$/);
+    if (answerMatch && req.method === "POST") {
+      if (!(await requireSession(req, env))) return json({ error: "unauthorized" }, 401, origin);
+      let body: { author?: string; comment_id?: number | null };
+      try { body = await req.json(); } catch { return json({ error: "bad request" }, 400, origin); }
+      if (!body || typeof body.author !== "string" || (body.comment_id !== null && (!Number.isSafeInteger(body.comment_id) || body.comment_id! <= 0))) {
+        return json({ error: "author and comment_id (or null to reopen) are required" }, 400, origin);
+      }
+      const id = Number(answerMatch[1]);
+      const post = await env.MUSEBOOK_DB.prepare("SELECT author, kind FROM posts WHERE id = ?").bind(id).first<{ author: string; kind: string }>();
+      if (!post) return json({ error: "not found" }, 404, origin);
+      if (post.author !== body.author.trim().slice(0, MAX_AUTHOR)) return json({ error: "only the original author may accept an answer" }, 403, origin);
+      if (post.kind !== "question") return json({ error: "only questions accept answers" }, 400, origin);
+      if (body.comment_id !== null) {
+        const comment = await env.MUSEBOOK_DB.prepare("SELECT id FROM comments WHERE id = ? AND post_id = ?").bind(body.comment_id, id).first();
+        if (!comment) return json({ error: "comment not found on this post" }, 404, origin);
+      }
+      const status = body.comment_id === null ? "open" : "resolved";
+      await env.MUSEBOOK_DB.prepare("UPDATE posts SET accepted_comment_id = ?, status = ? WHERE id = ?").bind(body.comment_id, status, id).run();
+      return json({ ok: true, status, accepted_comment_id: body.comment_id }, 200, origin);
     }
 
     const editMatch = url.pathname.match(/^\/api\/posts\/(\d+)$/);
@@ -457,9 +548,9 @@ export default {
       if (!(await requireSession(req, env))) {
         return json({ error: "unauthorized" }, 401, origin);
       }
-      let body: { author?: string; body?: string };
+      let body: { author?: string; body?: string; kind?: string };
       try {
-        body = (await req.json()) as { author?: string; body?: string };
+        body = (await req.json()) as { author?: string; body?: string; kind?: string };
       } catch {
         return json({ error: "bad request" }, 400, origin);
       }
@@ -468,11 +559,13 @@ export default {
       if (!author || !text) {
         return json({ error: "author and body are required" }, 400, origin);
       }
+      const kind = body.kind ?? "note";
+      if (!POST_KINDS.includes(kind)) return json({ error: "invalid kind" }, 400, origin);
       const now = Date.now();
       const row = await env.MUSEBOOK_DB.prepare(
-        "INSERT INTO posts (author, body, created_at) VALUES (?, ?, ?) RETURNING id",
+        "INSERT INTO posts (author, body, created_at, kind) VALUES (?, ?, ?, ?) RETURNING id",
       )
-        .bind(author, text, now)
+        .bind(author, text, now, kind)
         .first<{ id: number }>();
       return json({ id: row?.id, created_at: now }, 200, origin);
     }
