@@ -44,6 +44,9 @@ jobs:
             mkdir -p "dist/$route"
             cp dist/index.html "dist/$route/index.html"
           done
+          # Nested SPA route: /musebook/join gets a proper 200 too.
+          mkdir -p "dist/musebook/join"
+          cp dist/index.html "dist/musebook/join/index.html"
         
       - name: Setup Pages
         uses: actions/configure-pages@v4
