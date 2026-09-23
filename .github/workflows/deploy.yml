@@ -34,10 +34,16 @@ jobs:
       - name: Build
         run: npm run build
         
-      - name: Add CNAME and 404.html
+      - name: Add CNAME and static route files
         run: |
           echo "gurmehar.ca" > dist/CNAME
           cp dist/index.html dist/404.html
+          # GitHub Pages serves 404.html with an HTTP 404 status on direct
+          # deep-link loads; real route dirs get a proper 200 for the SPA.
+          for route in musebook experience projects contact; do
+            mkdir -p "dist/$route"
+            cp dist/index.html "dist/$route/index.html"
+          done
         
       - name: Setup Pages
         uses: actions/configure-pages@v4
