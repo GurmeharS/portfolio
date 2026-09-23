@@ -1,6 +1,8 @@
 export interface Env {
   MUSEBOOK_DB: D1Database;
-  MUSEBOOK_PASSCODE_HASH: string;
+  // Plaintext shared passcode, set as a Worker secret via the Cloudflare API.
+  // Never committed to git — the repo only reads the env var.
+  MUSEBOOK_PASSCODE: string;
 }
 
 const ALLOWED_ORIGINS = ["https://gurmehar.ca", "https://www.gurmehar.ca"];
@@ -14,29 +16,46 @@ const UNLOCK_MAX_ATTEMPTS_GLOBAL = 200;
 // D1-backed throttle for the unlock endpoint. Per-isolate in-memory counters
 // are bypassable (requests fan out across many isolates), so budgets live in
 // the database: one per client IP plus a shared global budget.
+//
+// NOTE: never use `... RETURNING` on parameterized D1 writes here. A D1 build
+// was seen wedging (request hangs until the worker timeout, zero bytes back)
+// on parameterized upserts with RETURNING — first twice in one db.batch(),
+// then again as two sequential statements. The upsert runs without RETURNING
+// and the count is read back with a plain SELECT. The whole check is also
+// raced against a timeout so a wedged DB call fails closed (429) instead of
+// hanging the request.
 async function unlockAllowed(db: D1Database, ip: string): Promise<boolean> {
-  const now = Date.now();
-  const windowEnd = now + UNLOCK_WINDOW_MS;
-  const upsert =
-    "INSERT INTO unlock_limits(key, count, reset) VALUES (?, 1, ?) " +
-    "ON CONFLICT(key) DO UPDATE SET " +
-    "count = CASE WHEN unlock_limits.reset < ? THEN 1 ELSE unlock_limits.count + 1 END, " +
-    "reset = CASE WHEN unlock_limits.reset < ? THEN ? ELSE unlock_limits.reset END " +
-    "RETURNING count";
-  try {
-    const results = await db.batch([
-      db.prepare(upsert).bind("ip:" + ip, windowEnd, now, now, windowEnd),
-      db.prepare(upsert).bind("forum", windowEnd, now, now, windowEnd),
-    ]);
-    const countOf = (i: number): number => {
-      const rows = results[i].results as unknown[] | undefined;
-      const first = rows && (rows[0] as { count?: number } | undefined);
-      return typeof first?.count === "number" ? first.count : 0;
+  const check = (async () => {
+    const now = Date.now();
+    const windowEnd = now + UNLOCK_WINDOW_MS;
+    const countOf = async (key: string): Promise<number> => {
+      await db
+        .prepare(
+          "INSERT INTO unlock_limits(key, count, reset) VALUES (?, 1, ?) " +
+            "ON CONFLICT(key) DO UPDATE SET " +
+            "count = CASE WHEN unlock_limits.reset < ? THEN 1 ELSE unlock_limits.count + 1 END, " +
+            "reset = CASE WHEN unlock_limits.reset < ? THEN ? ELSE unlock_limits.reset END",
+        )
+        .bind(key, windowEnd, now, now, windowEnd)
+        .run();
+      const row = await db
+        .prepare("SELECT count FROM unlock_limits WHERE key = ?")
+        .bind(key)
+        .first<{ count?: number }>();
+      return typeof row?.count === "number" ? row.count : 0;
     };
+    const ipCount = await countOf("ip:" + ip);
+    const forumCount = await countOf("forum");
     return (
-      countOf(0) <= UNLOCK_MAX_ATTEMPTS_PER_IP &&
-      countOf(1) <= UNLOCK_MAX_ATTEMPTS_GLOBAL
+      ipCount <= UNLOCK_MAX_ATTEMPTS_PER_IP &&
+      forumCount <= UNLOCK_MAX_ATTEMPTS_GLOBAL
     );
+  })();
+  const timeout = new Promise<boolean>((resolve) =>
+    setTimeout(() => resolve(false), 8000),
+  );
+  try {
+    return await Promise.race([check, timeout]);
   } catch {
     return false; // fail closed on DB errors
   }
@@ -116,6 +135,77 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
+    // TEMPORARY diagnostic for the unlock hang (remove after fix).
+    if (url.pathname === "/api/diagpost" && req.method === "POST") {
+      const t0 = Date.now();
+      let bodyResult = "not attempted";
+      try {
+        bodyResult = await Promise.race([
+          req
+            .json()
+            .then((b) => "json-ok: " + JSON.stringify(b).slice(0, 120)),
+          new Promise<string>((r) =>
+            setTimeout(() => r("json-timeout-6s"), 6000),
+          ),
+        ]);
+      } catch (e) {
+        bodyResult = "json-threw: " + (e as Error)?.message;
+      }
+      return json({ bodyResult, ms: Date.now() - t0 });
+    }
+    if (url.pathname === "/api/diag" && req.method === "GET") {
+      const t0 = Date.now();
+      const timerTest = await Promise.race([
+        new Promise<string>((r) => setTimeout(() => r("timer-fired"), 2000)),
+        new Promise<string>((r) => setTimeout(() => r("timer-stuck"), 6000)),
+      ]);
+      const t1 = Date.now();
+      let writeResult = "not attempted";
+      const t2 = Date.now();
+      try {
+        writeResult = await Promise.race([
+          env.MUSEBOOK_DB.prepare(
+            "INSERT INTO unlock_limits(key, count, reset) VALUES (?, 1, ?) " +
+              "ON CONFLICT(key) DO UPDATE SET count = count + 1",
+          )
+            .bind("diag", Date.now() + 60000)
+            .run()
+            .then(() => "write-ok"),
+          new Promise<string>((r) =>
+            setTimeout(() => r("write-timeout-6s"), 6000),
+          ),
+        ]);
+      } catch (e) {
+        writeResult = "write-threw: " + (e as Error)?.message;
+      }
+      const t3 = Date.now();
+      const t4 = Date.now();
+      let allowedResult = "not attempted";
+      try {
+        allowedResult = String(
+          await Promise.race([
+            unlockAllowed(env.MUSEBOOK_DB, "diag-test").then(
+              (v) => "allowed=" + v,
+            ),
+            new Promise<string>((r) =>
+              setTimeout(() => r("unlockAllowed-timeout-6s"), 6000),
+            ),
+          ]),
+        );
+      } catch (e) {
+        allowedResult = "unlockAllowed-threw: " + (e as Error)?.message;
+      }
+      const t5 = Date.now();
+      return json({
+        timerTest,
+        timerMs: t1 - t0,
+        writeResult,
+        writeMs: t3 - t2,
+        allowedResult,
+        allowedMs: t5 - t4,
+      });
+    }
+
     if (url.pathname === "/api/unlock" && req.method === "POST") {
       if (!(await unlockAllowed(env.MUSEBOOK_DB, clientIp(req)))) {
         return json({ error: "too many attempts, slow down" }, 429, origin);
@@ -127,12 +217,11 @@ export default {
         return json({ error: "bad request" }, 400, origin);
       }
       const passcode = typeof body.passcode === "string" ? body.passcode : "";
+      // Simple plaintext comparison against the Worker secret.
+      // The secret is set via the Cloudflare API and never lives in git.
       const ok =
         passcode.length > 0 &&
-        timingSafeEqual(
-          await sha256hex(passcode),
-          env.MUSEBOOK_PASSCODE_HASH,
-        );
+        timingSafeEqual(passcode, env.MUSEBOOK_PASSCODE);
       if (!ok) return json({ error: "wrong passcode" }, 401, origin);
       const token = randomToken();
       const now = Date.now();
