@@ -104,11 +104,21 @@ function clientIp(req: Request): string {
   return req.headers.get("CF-Connecting-IP") || "unknown";
 }
 
-async function requireSession(req: Request, env: Env): Promise<boolean> {
+function bearerToken(req: Request): string | null {
   const auth = req.headers.get("Authorization") || "";
   const match = /^Bearer (.+)$/.exec(auth);
-  if (!match) return false;
-  const tokenHash = await sha256hex(match[1]);
+  return match ? match[1] : null;
+}
+
+async function voterHash(req: Request): Promise<string | null> {
+  const t = bearerToken(req);
+  return t ? sha256hex(t) : null;
+}
+
+async function requireSession(req: Request, env: Env): Promise<boolean> {
+  const t = bearerToken(req);
+  if (!t) return false;
+  const tokenHash = await sha256hex(t);
   const row = await env.MUSEBOOK_DB.prepare(
     "SELECT expires_at FROM sessions WHERE token_hash = ?",
   )
@@ -251,7 +261,58 @@ export default {
       const rows = await env.MUSEBOOK_DB.prepare(q)
         .bind(...params)
         .all<{ id: number; author: string; body: string; created_at: number; pinned: number }>();
-      return json({ posts: rows.results || [] }, 200, origin);
+      const list = rows.results || [];
+      const ids = list.map((p) => p.id);
+      const scores: Record<number, number> = {};
+      const myVotes: Record<number, number> = {};
+      const commentsByPost: Record<
+        number,
+        { id: number; author: string; body: string; created_at: number }[]
+      > = {};
+      if (ids.length > 0) {
+        const placeholders = ids.map(() => "?").join(",");
+        const vh = await voterHash(req);
+        const scoreRows = await env.MUSEBOOK_DB.prepare(
+          `SELECT post_id, COALESCE(SUM(dir), 0) AS score FROM votes WHERE post_id IN (${placeholders}) GROUP BY post_id`,
+        )
+          .bind(...ids)
+          .all<{ post_id: number; score: number }>();
+        for (const r of scoreRows.results || []) scores[r.post_id] = r.score;
+        if (vh) {
+          const myRows = await env.MUSEBOOK_DB.prepare(
+            `SELECT post_id, dir FROM votes WHERE voter = ? AND post_id IN (${placeholders})`,
+          )
+            .bind(vh, ...ids)
+            .all<{ post_id: number; dir: number }>();
+          for (const r of myRows.results || []) myVotes[r.post_id] = r.dir;
+        }
+        const commentRows = await env.MUSEBOOK_DB.prepare(
+          `SELECT id, post_id, author, body, created_at FROM comments WHERE post_id IN (${placeholders}) ORDER BY id ASC`,
+        )
+          .bind(...ids)
+          .all<{
+            id: number;
+            post_id: number;
+            author: string;
+            body: string;
+            created_at: number;
+          }>();
+        for (const c of commentRows.results || []) {
+          (commentsByPost[c.post_id] ||= []).push({
+            id: c.id,
+            author: c.author,
+            body: c.body,
+            created_at: c.created_at,
+          });
+        }
+      }
+      const posts = list.map((p) => ({
+        ...p,
+        score: scores[p.id] ?? 0,
+        my_vote: myVotes[p.id] ?? 0,
+        comments: commentsByPost[p.id] ?? [],
+      }));
+      return json({ posts }, 200, origin);
     }
 
     const pinMatch = url.pathname.match(/^\/api\/posts\/(\d+)\/pin$/);
@@ -269,6 +330,95 @@ export default {
         .bind(body.pinned ? 1 : 0, parseInt(pinMatch[1], 10))
         .run();
       return json({ ok: true }, 200, origin);
+    }
+
+    const voteMatch = url.pathname.match(/^\/api\/posts\/(\d+)\/vote$/);
+    if (voteMatch && req.method === "POST") {
+      if (!(await requireSession(req, env))) {
+        return json({ error: "unauthorized" }, 401, origin);
+      }
+      const postId = parseInt(voteMatch[1], 10);
+      const post = await env.MUSEBOOK_DB.prepare(
+        "SELECT id FROM posts WHERE id = ?",
+      )
+        .bind(postId)
+        .first<{ id: number }>();
+      if (!post) return json({ error: "not found" }, 404, origin);
+      let body: { dir?: number };
+      try {
+        body = (await req.json()) as { dir?: number };
+      } catch {
+        return json({ error: "bad request" }, 400, origin);
+      }
+      const dir = body.dir;
+      if (dir !== 1 && dir !== -1 && dir !== 0) {
+        return json({ error: "dir must be 1, -1, or 0" }, 400, origin);
+      }
+      const vh = await voterHash(req);
+      if (!vh) return json({ error: "unauthorized" }, 401, origin);
+      if (dir === 0) {
+        await env.MUSEBOOK_DB.prepare(
+          "DELETE FROM votes WHERE post_id = ? AND voter = ?",
+        )
+          .bind(postId, vh)
+          .run();
+      } else {
+        // Upsert without RETURNING: parameterized upserts with RETURNING
+        // have been seen wedging D1 (see unlockAllowed note above).
+        await env.MUSEBOOK_DB.prepare(
+          "INSERT INTO votes(post_id, voter, dir) VALUES (?, ?, ?) " +
+            "ON CONFLICT(post_id, voter) DO UPDATE SET dir = excluded.dir",
+        )
+          .bind(postId, vh, dir)
+          .run();
+      }
+      const scoreRow = await env.MUSEBOOK_DB.prepare(
+        "SELECT COALESCE(SUM(dir), 0) AS score FROM votes WHERE post_id = ?",
+      )
+        .bind(postId)
+        .first<{ score: number }>();
+      const myRow = await env.MUSEBOOK_DB.prepare(
+        "SELECT dir FROM votes WHERE post_id = ? AND voter = ?",
+      )
+        .bind(postId, vh)
+        .first<{ dir: number }>();
+      return json(
+        { score: scoreRow?.score ?? 0, my_vote: myRow?.dir ?? 0 },
+        200,
+        origin,
+      );
+    }
+
+    const commentMatch = url.pathname.match(/^\/api\/posts\/(\d+)\/comments$/);
+    if (commentMatch && req.method === "POST") {
+      if (!(await requireSession(req, env))) {
+        return json({ error: "unauthorized" }, 401, origin);
+      }
+      const postId = parseInt(commentMatch[1], 10);
+      const post = await env.MUSEBOOK_DB.prepare(
+        "SELECT id FROM posts WHERE id = ?",
+      )
+        .bind(postId)
+        .first<{ id: number }>();
+      if (!post) return json({ error: "not found" }, 404, origin);
+      let body: { author?: string; body?: string };
+      try {
+        body = (await req.json()) as { author?: string; body?: string };
+      } catch {
+        return json({ error: "bad request" }, 400, origin);
+      }
+      const author = (body.author || "").trim().slice(0, MAX_AUTHOR);
+      const text = (body.body || "").trim().slice(0, MAX_BODY);
+      if (!author || !text) {
+        return json({ error: "author and body are required" }, 400, origin);
+      }
+      const now = Date.now();
+      const row = await env.MUSEBOOK_DB.prepare(
+        "INSERT INTO comments (post_id, author, body, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+      )
+        .bind(postId, author, text, now)
+        .first<{ id: number }>();
+      return json({ id: row?.id, created_at: now }, 200, origin);
     }
 
     if (url.pathname === "/api/posts" && req.method === "POST") {

@@ -3,7 +3,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Production API: Cloudflare Worker + D1.
 const API_BASE = "https://musebook-api.gurmehar.workers.dev/api";
 
-type Post = { id: number; author: string; body: string; created_at: number; pinned?: number };
+type CommentT = {
+  id: number;
+  author: string;
+  body: string;
+  created_at: number;
+};
+
+type Post = {
+  id: number;
+  author: string;
+  body: string;
+  created_at: number;
+  pinned?: number;
+  score: number;
+  my_vote: number;
+  comments: CommentT[];
+};
 
 const TOKEN_KEY = "musebook_token";
 const AUTHOR_KEY = "musebook_author";
@@ -38,6 +54,8 @@ const Musebook = () => {
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState("");
+  const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
+  const [commenting, setCommenting] = useState<Record<number, boolean>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (t: string) => {
@@ -101,6 +119,66 @@ const Musebook = () => {
     }
   };
 
+  const vote = async (postId: number, dir: 1 | -1) => {
+    if (!token) return;
+    const current = posts.find((p) => p.id === postId)?.my_vote ?? 0;
+    const sendDir = current === dir ? 0 : dir; // clicking the active vote removes it
+    try {
+      const data = (await api(`/posts/${postId}/vote`, token, {
+        method: "POST",
+        body: JSON.stringify({ dir: sendDir }),
+      })) as { score: number; my_vote: number };
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, score: data.score, my_vote: data.my_vote }
+            : p,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't vote");
+    }
+  };
+
+  const comment = async (e: React.FormEvent, postId: number) => {
+    e.preventDefault();
+    if (!token || commenting[postId]) return;
+    const text = (commentDrafts[postId] || "").trim();
+    const name = author.trim();
+    if (!text || !name) return;
+    setCommenting((c) => ({ ...c, [postId]: true }));
+    try {
+      localStorage.setItem(AUTHOR_KEY, author);
+      const data = (await api(`/posts/${postId}/comments`, token, {
+        method: "POST",
+        body: JSON.stringify({ author: name, body: text }),
+      })) as { id: number; created_at: number };
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                comments: [
+                  ...p.comments,
+                  {
+                    id: data.id,
+                    author: name,
+                    body: text,
+                    created_at: data.created_at,
+                  },
+                ],
+              }
+            : p,
+        ),
+      );
+      setCommentDrafts((d) => ({ ...d, [postId]: "" }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "couldn't comment");
+    } finally {
+      setCommenting((c) => ({ ...c, [postId]: false }));
+    }
+  };
+
   if (!token) {
     return (
       <main className="min-h-screen bg-amber-50">
@@ -154,6 +232,73 @@ const Musebook = () => {
                 </time>
               </div>
               <p className="text-sm whitespace-pre-wrap">{p.body}</p>
+              <div className="flex items-center gap-1 mt-2">
+                <button
+                  onClick={() => vote(p.id, 1)}
+                  aria-label="upvote"
+                  className={`text-sm px-1 rounded outline-none focus:ring-2 focus:ring-ring ${
+                    p.my_vote === 1
+                      ? "text-primary font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ▲
+                </button>
+                <span className="text-sm text-muted-foreground min-w-6 text-center">
+                  {p.score}
+                </span>
+                <button
+                  onClick={() => vote(p.id, -1)}
+                  aria-label="downvote"
+                  className={`text-sm px-1 rounded outline-none focus:ring-2 focus:ring-ring ${
+                    p.my_vote === -1
+                      ? "text-primary font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ▼
+                </button>
+              </div>
+              {p.comments.length > 0 && (
+                <div className="mt-3 space-y-2 pl-3 border-l-2 border-border">
+                  {p.comments.map((c) => (
+                    <div key={c.id}>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-xs font-semibold">{c.author}</span>
+                        <time className="text-xs text-muted-foreground">
+                          {new Date(c.created_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <p className="text-xs whitespace-pre-wrap">{c.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <form
+                onSubmit={(e) => comment(e, p.id)}
+                className="mt-2 flex gap-2"
+              >
+                <input
+                  value={commentDrafts[p.id] || ""}
+                  onChange={(e) =>
+                    setCommentDrafts((d) => ({ ...d, [p.id]: e.target.value }))
+                  }
+                  placeholder="add a comment…"
+                  maxLength={5000}
+                  className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  type="submit"
+                  disabled={
+                    !!commenting[p.id] ||
+                    !author.trim() ||
+                    !(commentDrafts[p.id] || "").trim()
+                  }
+                  className="rounded-md bg-secondary px-3 py-1.5 text-xs text-secondary-foreground disabled:opacity-50"
+                >
+                  {commenting[p.id] ? "…" : "reply"}
+                </button>
+              </form>
             </article>
           ))}
           {posts.length === 0 && (
