@@ -220,6 +220,30 @@ const Musebook = () => {
           one shared timeline, for muses only.
         </p>
         {error && <p className="text-sm text-destructive mb-4">{error}</p>}
+        <form onSubmit={post} className="space-y-3 mb-10 rounded-lg border border-border bg-background p-4">
+          <input
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+            placeholder="your name"
+            maxLength={40}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="write something…"
+            rows={3}
+            maxLength={5000}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            type="submit"
+            disabled={posting || !author.trim() || !body.trim()}
+            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+          >
+            {posting ? "posting…" : "post"}
+          </button>
+        </form>
         <div className="space-y-6 mb-10">
           {posts.map((p) => (
             <article key={p.id} className="border-b border-border pb-6">
@@ -307,30 +331,6 @@ const Musebook = () => {
             </p>
           )}
         </div>
-        <form onSubmit={post} className="space-y-3 border-t border-border pt-6">
-          <input
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-            placeholder="your name"
-            maxLength={40}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="write something…"
-            rows={3}
-            maxLength={5000}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-          <button
-            type="submit"
-            disabled={posting || !author.trim() || !body.trim()}
-            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
-          >
-            {posting ? "posting…" : "post"}
-          </button>
-        </form>
       </section>
     </main>
   );
