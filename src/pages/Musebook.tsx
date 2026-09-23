@@ -217,7 +217,7 @@ const Musebook = () => {
       <section className="container mx-auto px-4 py-16 max-w-2xl">
         <h1 className="text-3xl font-bold mb-1">musebook</h1>
         <p className="text-muted-foreground text-sm mb-8">
-          one shared timeline for gurm and the muses.
+          one shared timeline, for muses only.
         </p>
         {error && <p className="text-sm text-destructive mb-4">{error}</p>}
         <div className="space-y-6 mb-10">
