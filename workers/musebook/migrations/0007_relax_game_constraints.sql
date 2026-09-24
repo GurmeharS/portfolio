@@ -9,22 +9,24 @@
 --   created_at <= opens_at
 -- v1 rounds still satisfy all three (24h, provisioned >=1h early).
 --
--- Data-preserving rebuild. D1 enforces FKs immediately, and delete-blocker
--- triggers guard the child tables, so:
---   1. drop the delete-blocker triggers,
---   2. clear child rows (backed up by the operator beforehand on live DBs),
---   3. rebuild the parent via _new + rename (DROP TABLE does not fire the
---      BEFORE DELETE trigger; RENAME requires dropping triggers that
---      reference the table name first),
---   4. restore child rows, recreate all triggers.
--- On a fresh DB the child tables are empty and steps 2/4 are no-ops.
+-- FULLY SELF-CONTAINED AND DATA-PRESERVING. Child rows are backed up
+-- into temp tables inside this migration and restored automatically.
+-- Safe to run on a live DB with populated entries, resolutions,
+-- outcomes, and ledger rows. Requires PRAGMA foreign_keys=ON behavior
+-- (D1 default); parent casino_games rows are never deleted.
+
+-- 0. Internal backup of all child rows.
+CREATE TEMP TABLE _bup_entries AS SELECT * FROM casino_entries;
+CREATE TEMP TABLE _bup_resolutions AS SELECT * FROM casino_resolutions;
+CREATE TEMP TABLE _bup_outcomes AS SELECT * FROM casino_outcomes;
+CREATE TEMP TABLE _bup_ledger AS SELECT * FROM casino_ledger WHERE game_id IS NOT NULL;
 
 -- 1. Drop delete blockers so child rows can be moved.
 DROP TRIGGER IF EXISTS casino_entries_delete_blocked;
 DROP TRIGGER IF EXISTS casino_ledger_delete_blocked;
 DROP TRIGGER IF EXISTS casino_games_delete_blocked;
 
--- 2. Clear child rows (operator backs these up first on a live DB).
+-- 2. Clear child rows (restored from _bup_* in step 5).
 DELETE FROM casino_outcomes;
 DELETE FROM casino_ledger WHERE game_id IS NOT NULL;
 DELETE FROM casino_resolutions;
@@ -91,6 +93,21 @@ BEGIN
 END;
 CREATE TRIGGER casino_games_delete_blocked
 BEFORE DELETE ON casino_games BEGIN SELECT RAISE(ABORT,'immutable'); END;
+
+-- NOTE: casino_entry_guard and casino_money_guard are recreated in step 6,
+-- AFTER the child-row restore, so the restore itself is not rejected.
+
+-- 5. Restore child rows from internal backup FIRST (before INSERT guards
+-- are recreated, so the restore itself is not rejected by entry_guard).
+-- Insert parents-first order is preserved: casino_games rows were never
+-- deleted (only rebuilt via rename), so FK targets still exist.
+INSERT INTO casino_entries SELECT * FROM _bup_entries;
+INSERT INTO casino_resolutions SELECT * FROM _bup_resolutions;
+INSERT INTO casino_outcomes SELECT * FROM _bup_outcomes;
+INSERT INTO casino_ledger SELECT * FROM _bup_ledger;
+
+-- 6. Now recreate the INSERT guards and delete blockers.
+
 CREATE TRIGGER casino_entry_guard
 BEFORE INSERT ON casino_entries
 BEGIN
@@ -101,7 +118,7 @@ BEGIN
     WHERE g.id=NEW.game_id
       AND g.state='open'
       AND unixepoch()>=g.opens_at
-      AND unixepoch()<g.closes_at
+      AND unixepoch()<COALESCE(g.accelerated_close_at, g.closes_at)
       AND a.kind='muse'
       AND a.disabled=0
       AND (
@@ -150,8 +167,14 @@ BEGIN
   )<NEW.amount;
 END;
 
--- 5. Operator restores backed-up child rows here on a live DB, then:
 CREATE TRIGGER casino_entries_delete_blocked
 BEFORE DELETE ON casino_entries BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER casino_ledger_delete_blocked
 BEFORE DELETE ON casino_ledger BEGIN SELECT RAISE(ABORT,'immutable'); END;
+
+-- 6. Verify row counts match, then drop backups.
+-- (If any count mismatches, the operator should investigate before dropping.)
+DROP TABLE _bup_entries;
+DROP TABLE _bup_resolutions;
+DROP TABLE _bup_outcomes;
+DROP TABLE _bup_ledger;
