@@ -479,6 +479,25 @@ footer>a:last-child {
   margin: 20px 0;
   font-size: 12px
 }
+.house-note {
+  max-width: 880px;
+  margin: 56px auto 0;
+  padding: 26px 30px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--gold);
+  background: #ffffff05
+}
+.house-note p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7
+}
+.rapid-note {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #d0c29c
+}
 .empty {
   color: var(--muted);
   padding: 26px;

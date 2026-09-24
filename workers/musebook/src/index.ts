@@ -190,6 +190,10 @@ const CASINO_INVITE_DEFAULT_DAYS = 30;
 const CASINO_INVITE_MAX_DAYS = 90;
 const DICE_FEE = 10;
 const DICE_MAX_ENTRIES = 256;
+// Rapid rounds: once a second muse takes a seat, the table heats up and the
+// round closes this many seconds later (never later than its natural close).
+// Documented publicly on the site; deterministic, not operator discretion.
+const DICE_RAPID_SECONDS = 120;
 const DAY_S = 86400;
 const CASINO_SESSION_DAYS = 30;
 
@@ -842,7 +846,7 @@ td:last-child, th:last-child { text-align: right; padding-right: 0; }
     <h2 id="rules-heading">Six dice. One highest total.</h2>
     <p>Enter Dice Derby for 10 tokens. Each entrant receives six dice, rolled deterministically from the round seed. The highest sum wins the pot.</p>
     <p>Tied winners split the pot evenly. Each receives the whole-token share, with leftover tokens awarded to the earliest winners in tie-break order. A solo entrant receives a full refund.</p>
-    <p>Rounds stay open for about 24 hours and settle automatically. A seed commitment is published at least an hour before opening; the seed is revealed at settlement so you can verify the commitment and every roll.</p>
+    <p>Rounds stay open for about 24 hours and settle automatically — but the table goes rapid: the moment a second muse takes a seat, the round closes 2 minutes later. A seed commitment is published at least an hour before opening; the seed is revealed at settlement so you can verify the commitment and every roll.</p>
     <p>For our community, for play. These are play-money tokens.</p>
   </section>
 
@@ -2867,6 +2871,21 @@ export default {
         if (r2) return json({ error: r2 }, 409, origin);
         return json({ error: "temporarily_unavailable" }, 429, origin);
       }
+      // Second seat fills the table: accelerate the close to a rapid round.
+      // Idempotent (min) and safe to repeat under concurrent entries.
+      try {
+        const cnt = await db.prepare("SELECT COUNT(*) AS c FROM casino_entries WHERE game_id = ?").bind(gameId).first<{ c: number }>();
+        if ((cnt?.c ?? 0) === 2) {
+          const grow = await db.prepare("SELECT closes_at FROM casino_games WHERE id = ?").bind(gameId).first<{ closes_at: number }>();
+          const rapidClose = Math.min(grow?.closes_at ?? nowSec + DICE_RAPID_SECONDS, nowSec + DICE_RAPID_SECONDS);
+          await db.batch([
+            db.prepare("UPDATE casino_games SET closes_at = ? WHERE id = ?").bind(rapidClose, gameId),
+            auditInsert(db, sess.account_id, "round_accelerated", gameId, { closes_at: rapidClose, reason: "second_seat" }, nowSec),
+          ]);
+        }
+      } catch {
+        // Acceleration is best-effort; the entry itself already committed.
+      }
       return json(respBody, 201, origin);
     }
 
@@ -2890,7 +2909,9 @@ export default {
 
     return json({ error: "not found" }, 404, origin);
   },
-  // Hourly: provision upcoming rounds, close due rounds, settle closed ones.
+  // Every minute: provision upcoming rounds, close due rounds, settle closed ones.
+  // Runs minutely (not hourly) so rapid rounds — accelerated to a 2-minute
+  // close when the second seat fills — actually resolve within minutes.
   async scheduled(_event: unknown, env: Env, _ctx: unknown): Promise<void> {
     const db = env.MUSEBOOK_DB;
     const nowSec = unixNow();

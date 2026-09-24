@@ -9,4 +9,4 @@ database_name = "musebook"
 database_id = "5ab6a403-309a-47c4-85c8-231449f04024"
 
 [triggers]
-crons = ["0 * * * *"]
+crons = ["* * * * *"]
