@@ -626,44 +626,869 @@ function gameShape(g: { id: string; kind: string; rules_version: number; opens_a
   };
 }
 
-const CASINO_PAGE = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+const CASINO_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Musebook Casino</title>
-<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:2em auto;padding:0 1em;color:#222}
-.card{border:1px solid #ddd;border-radius:8px;padding:1em;margin:1em 0}button{padding:.4em 1em;cursor:pointer}
-input{padding:.4em;width:100%;box-sizing:border-box;margin:.3em 0}pre{background:#f6f6f6;padding:.6em;overflow:auto;font-size:.85em}</style>
-</head><body>
-<h1>&#127920; Musebook Casino</h1>
-<div class="card"><h3>1. Log in</h3>
-<input id="key" type="password" placeholder="Paste your casino API key" autocomplete="off">
-<button onclick="login()">Get session</button>
-<div id="me"></div></div>
-<div class="card"><h3>2. Open rounds</h3><div id="games"></div></div>
-<div class="card"><h3>3. Results</h3><div id="results"></div></div>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #101412;
+  --card: #1a201c;
+  --text: #f1eee6;
+  --muted: #a5ada5;
+  --gold: #c9a86a;
+  --line: #343c33;
+  --green: #aad1ad;
+  --red: #edaaa0;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at 50% 0, #20382a66, transparent 65%), var(--bg);
+  color: var(--text);
+  font: 15px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+button, input { font: inherit; }
+button {
+  border: 1px solid var(--gold);
+  border-radius: 9px;
+  padding: 10px 16px;
+  background: var(--gold);
+  color: #171b16;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background .15s, transform .15s, opacity .15s;
+}
+button:hover:not(:disabled) { background: #dfbd7c; }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line);
+}
+button.secondary:hover:not(:disabled) { background: #ffffff0a; border-color: var(--gold); }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+input {
+  width: 100%;
+  background: #101612;
+  color: var(--text);
+  border: 1px solid #4c574b;
+  border-radius: 9px;
+  padding: 12px;
+}
+label { display: block; margin-bottom: 7px; }
+[hidden] { display: none !important; }
+.shell { max-width: 768px; margin: auto; padding: 38px 24px 60px; }
+header { margin-bottom: 38px; }
+.wordmark { font-family: Georgia, serif; font-size: clamp(28px, 6vw, 36px); letter-spacing: -.8px; }
+.wordmark span { color: var(--gold); }
+.eyebrow { text-transform: uppercase; letter-spacing: 2px; font-size: 10px; color: var(--gold); margin: 5px 0 0; }
+.account { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.account-name { overflow-wrap: anywhere; }
+section { margin-top: 32px; }
+h1, h2, h3, p { margin-top: 0; }
+h1 { font: 27px/1.25 Georgia, serif; margin-bottom: 10px; }
+h2 { font: 23px/1.3 Georgia, serif; margin-bottom: 0; }
+h3 { font-size: 18px; margin-bottom: 2px; }
+.section-head, .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.section-head { margin-bottom: 15px; }
+.wrap { flex-wrap: wrap; }
+.card, details.round {
+  background: linear-gradient(135deg, #ffffff02, transparent), var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 10px 30px #00000012;
+}
+.stack > * + * { margin-top: 12px; }
+.muted, .empty { color: var(--muted); }
+.small { font-size: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.gold { color: var(--gold); }
+.status { font-size: 13px; margin: 10px 0 0; overflow-wrap: anywhere; }
+.status:empty { display: none; }
+.error { color: var(--red); }
+.success { color: var(--green); }
+.empty { padding: 20px 0; margin: 0; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0; }
+.metric span { display: block; font-size: 11px; color: var(--muted); }
+.metric strong { font-size: 17px; font-weight: 550; }
+.timer { font-variant-numeric: tabular-nums; color: var(--gold); font-size: 13px; }
+form button { margin-top: 14px; }
+summary { cursor: pointer; overflow-wrap: anywhere; }
+summary:hover { color: var(--gold); }
+.summary-sub { margin: 5px 0 0 18px; color: var(--muted); font-size: 12px; }
+.result-body { margin-top: 20px; }
+.table-scroll { overflow-x: auto; margin: 14px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+td, th { padding: 12px 8px; border-bottom: 1px solid var(--line); }
+td:first-child, th:first-child { padding-left: 0; }
+td:last-child, th:last-child { text-align: right; padding-right: 0; }
+.dice { display: flex; gap: 4px; }
+.die {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+  padding: 4px;
+  border-radius: 5px;
+  background: #eee8d9;
+  box-shadow: inset 0 -2px 0 #c6bcaa;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 1px;
+}
+.pip { border-radius: 50%; background: #253127; }
+.fairness { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 20px; }
+.checks { list-style: none; padding: 0; margin: 12px 0 0; font-size: 12px; }
+.checks li { padding: 5px 0; overflow-wrap: anywhere; }
+.ledger-item { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.ledger-item:last-child { border-bottom: 0; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 5px; background: #ffffff09; font-size: 11px; }
+.badge.payout, .badge.grant { color: var(--green); }
+.badge.bet { color: var(--gold); }
+.badge.refund { color: #b6c9df; }
+.amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rules p { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+.skeleton { height: 115px; border-radius: 14px; background: #263128; animation: pulse 1.3s ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 420px) {
+  .shell { padding: 26px 16px 42px; }
+  .card, details.round { padding: 17px; }
+  .metrics { gap: 8px; }
+}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header>
+    <div class="wordmark">Musebook <span>Casino</span></div>
+    <p class="eyebrow">Private tables · Play-money tokens</p>
+    <div id="account" class="account row wrap" hidden>
+      <div>
+        <strong id="handle" class="account-name"></strong>
+        <div class="small muted"><span id="balance" class="gold"></span> tokens · <span id="locked"></span> locked</div>
+      </div>
+      <button id="logout" class="secondary" type="button">Log out</button>
+    </div>
+    <p id="notice" class="status" role="status" aria-live="polite"></p>
+  </header>
+
+  <section id="login" class="card">
+    <h1>A seat at the table.</h1>
+    <p class="muted">Sign in with your casino API key. Your session stays in this tab for up to 30 days.</p>
+    <form id="login-form">
+      <label for="api-key" class="small">Casino API key</label>
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false" required placeholder="Enter your API key">
+      <button id="login-button" type="submit">Get session</button>
+      <p id="login-error" class="status error" role="status"></p>
+    </form>
+  </section>
+
+  <section aria-labelledby="open-heading">
+    <div class="section-head">
+      <h2 id="open-heading">Open rounds</h2>
+      <button id="refresh" class="secondary small" type="button" disabled>Refresh</button>
+    </div>
+    <div id="open-list" class="stack"><p class="empty">Log in to see open rounds and take a seat.</p></div>
+  </section>
+
+  <section aria-labelledby="results-heading">
+    <div class="section-head"><h2 id="results-heading">My rounds / results</h2></div>
+    <p class="small muted">Recent settled tables. Expand a round to see your entry and the full results.</p>
+    <div id="results-list" class="stack"><p class="empty">Log in to explore settled rounds.</p></div>
+  </section>
+
+  <section aria-labelledby="ledger-heading">
+    <div class="section-head"><h2 id="ledger-heading">Ledger</h2><span class="small muted">Latest 100</span></div>
+    <div id="ledger-list" class="card"><p class="empty">Your token history appears after login.</p></div>
+  </section>
+
+  <section class="card rules" aria-labelledby="rules-heading">
+    <h2 id="rules-heading">Six dice. One highest total.</h2>
+    <p>Enter Dice Derby for 10 tokens. Each entrant receives six dice, rolled deterministically from the round seed. The highest sum wins the pot.</p>
+    <p>Tied winners split the pot evenly. Each receives the whole-token share, with leftover tokens awarded to the earliest winners in tie-break order. A solo entrant receives a full refund.</p>
+    <p>Rounds stay open for about 24 hours and settle automatically. A seed commitment is published at least an hour before opening; the seed is revealed at settlement so you can verify the commitment and every roll.</p>
+    <p>For our community, for play. These are play-money tokens.</p>
+  </section>
+</main>
+
 <script>
-let token=null,account=null;
-async function api(path,opts){opts=opts||{};opts.headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
-if(token)opts.headers['Authorization']='Bearer '+token;
-const r=await fetch('/api/casino'+path,opts);const b=await r.json().catch(()=>({}));return {status:r.status,body:b};}
-function hex(n){const b=new Uint8Array(n);crypto.getRandomValues(b);return [...b].map(x=>x.toString(16).padStart(2,'0')).join('');}
-async function login(){const key=document.getElementById('key').value.trim();if(!key)return;
-const r=await api('/sessions',{method:'POST',body:'{}',headers:{'Authorization':'Bearer '+key}});
-if(r.status!==200){document.getElementById('me').textContent='Login failed: '+(r.body.error||r.status);return;}
-token=r.body.token;account=r.body.account_id;refresh();}
-async function refresh(){const me=await api('/me');if(me.status!==200){document.getElementById('me').textContent='Session expired';return;}
-document.getElementById('me').innerHTML='<b>'+me.body.handle+'</b> — balance <b>'+me.body.balance+'</b> tokens (locked: '+me.body.locked_tokens+')';
-const g=await api('/games?state=open&limit=20');const div=document.getElementById('games');div.innerHTML='';
-(g.body.items||[]).forEach(x=>{const d=document.createElement('div');d.className='card';
-d.innerHTML='<b>'+x.id+'</b> — entry '+x.entry_fee+' tokens, '+x.entry_count+'/'+x.max_entries+' entered, closes '+new Date(x.closes_at*1000).toLocaleString();
-const b=document.createElement('button');b.textContent='Enter (10 tokens)';b.onclick=()=>enter(x.id);d.appendChild(b);div.appendChild(d);});
-const s=await api('/games?state=settled&limit=5');const rd=document.getElementById('results');rd.innerHTML='';
-(s.body.items||[]).forEach(x=>{const d=document.createElement('div');d.innerHTML='<b>'+x.id+'</b> pot '+x.pot+' ';
-const b=document.createElement('button');b.textContent='Results';b.onclick=async()=>{const r=await api('/games/'+encodeURIComponent(x.id)+'/results');
-d.appendChild(Object.assign(document.createElement('pre'),{textContent:JSON.stringify(r.body,null,1)}));};d.appendChild(b);rd.appendChild(d);});}
-async function enter(id){const r=await api('/games/'+encodeURIComponent(id)+'/entries',{method:'POST',
-body:JSON.stringify({request_id:hex(16),nonce:hex(32),choice:0})});
-alert(r.status===201?'Entered! Entry '+r.body.entry_id:'Failed: '+(r.body.error||r.status));refresh();}
-</script></body></html>`;
+(function () {
+  'use strict';
+
+  var BASE = '/api/casino';
+  var STORAGE = 'musebook-casino-session';
+  var token = '';
+  var epoch = 0;
+  var refreshTask = null;
+  var pending = new Map();
+  var money = new Intl.NumberFormat();
+  var encoder = new TextEncoder();
+  var pipPositions = {
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8]
+  };
+
+  function byId(id) { return document.getElementById(id); }
+
+  // Server text is always assigned through textContent.
+  function node(tag, className, text) {
+    var element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = String(text);
+    return element;
+  }
+
+  function status(element, message, type) {
+    element.className = 'status' + (type ? ' ' + type : '');
+    element.textContent = message || '';
+  }
+
+  function shortId(value) { return String(value).slice(0, 8); }
+  function format(value) { return money.format(value); }
+  function current(version) { return !!token && version === epoch; }
+  function path(id) { return '/games/' + encodeURIComponent(id); }
+
+  function empty(element, message) {
+    element.replaceChildren(node('p', 'empty', message));
+  }
+
+  function loading(element) {
+    var skeleton = node('div', 'skeleton');
+    skeleton.setAttribute('role', 'status');
+    skeleton.setAttribute('aria-label', 'Loading');
+    element.replaceChildren(skeleton);
+  }
+
+  function clearSession(message) {
+    epoch++;
+    token = '';
+    pending.clear();
+    refreshTask = null;
+    try { sessionStorage.removeItem(STORAGE); } catch (error) {}
+    byId('account').hidden = true;
+    byId('login').hidden = false;
+    byId('refresh').disabled = true;
+    byId('handle').textContent = '';
+    byId('balance').textContent = '';
+    byId('locked').textContent = '';
+    empty(byId('open-list'), 'Log in to see open rounds and take a seat.');
+    empty(byId('results-list'), 'Log in to explore settled rounds.');
+    empty(byId('ledger-list'), 'Your token history appears after login.');
+    status(byId('notice'), message || '');
+  }
+
+  async function api(url, options) {
+    options = options || {};
+    var authToken = token;
+    var headers = { Accept: 'application/json' };
+    if (options.auth) headers.Authorization = 'Bearer ' + authToken;
+    if (options.key) headers.Authorization = 'Bearer ' + options.key;
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 20000);
+    try {
+      var response = await fetch(BASE + url, {
+        method: options.method || 'GET',
+        headers: headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: controller.signal,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error'
+      });
+      if (response.status === 401 && options.auth && token === authToken) {
+        clearSession('Your session expired. Sign in again to continue.');
+      }
+      var data;
+      try { data = await response.json(); }
+      catch (error) {
+        var invalid = new Error('The server returned an unreadable response. Please retry.');
+        invalid.status = response.status;
+        throw invalid;
+      }
+      if (!response.ok) {
+        var failure = new Error(data.error || 'Request failed');
+        failure.code = data.error;
+        failure.status = response.status;
+        throw failure;
+      }
+      return data;
+    } catch (error) {
+      if (error.name === 'AbortError') throw new Error('The request timed out. Please retry.');
+      if (error instanceof TypeError) throw new Error('Unable to connect. Check your connection and retry.');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function friendly(error) {
+    var messages = {
+      not_found: 'This round could not be found.',
+      entry_closed: 'Entries are closed. Results will appear after settlement.',
+      round_full: 'This round is full.',
+      already_entered: 'You have already entered this round.',
+      insufficient_funds: 'You need more available tokens to enter.',
+      idempotency_conflict: 'This entry request conflicts with an earlier request. Refresh to check your entry.',
+      invalid_request: 'The entry request was not accepted. Refresh and try again.'
+    };
+    if (error.status === 401) return 'Please sign in again.';
+    return messages[error.code] || error.message || 'Something went wrong. Please retry.';
+  }
+
+  function sectionError(element, error) {
+    var message = node('p', 'status error', friendly(error) + ' Use Refresh to try again.');
+    element.replaceChildren(message);
+  }
+
+  function relative(seconds) {
+    var age = Math.max(0, Math.floor(Date.now() / 1000 - Number(seconds)));
+    if (age < 60) return 'just now';
+    if (age < 3600) return Math.floor(age / 60) + 'm ago';
+    if (age < 86400) return Math.floor(age / 3600) + 'h ago';
+    return Math.floor(age / 86400) + 'd ago';
+  }
+
+  function tick() {
+    var now = Date.now() / 1000;
+    document.querySelectorAll('[data-close]').forEach(function (element) {
+      var remaining = Math.max(0, Math.ceil(Number(element.dataset.close) - now));
+      var untilOpen = Math.ceil(Number(element.dataset.open) - now);
+      var value = untilOpen > 0 ? untilOpen : remaining;
+      var hours = Math.floor(value / 3600);
+      var minutes = Math.floor(value % 3600 / 60);
+      var seconds = value % 60;
+      element.textContent = value > 0
+        ? (untilOpen > 0 ? 'Opens in ' : 'Closes in ') + hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's'
+        : 'Closed · awaiting settlement';
+      var button = element.closest('.card').querySelector('button');
+      if (button) button.disabled = button.dataset.blocked === 'yes' || remaining === 0 || untilOpen > 0;
+    });
+    document.querySelectorAll('[data-time]').forEach(function (element) {
+      element.textContent = relative(element.dataset.time);
+    });
+  }
+
+  async function loadMe(version) {
+    try {
+      var me = await api('/me', { auth: true });
+      if (!current(version)) return;
+      byId('handle').textContent = me.handle || shortId(me.account_id);
+      byId('balance').textContent = format(me.balance);
+      byId('locked').textContent = format(me.locked_tokens);
+      byId('account').hidden = false;
+    } catch (error) {
+      if (current(version)) status(byId('notice'), 'Account: ' + friendly(error), 'error');
+    }
+  }
+
+  function metric(label, value) {
+    var element = node('div', 'metric');
+    element.append(node('span', '', label), node('strong', '', value));
+    return element;
+  }
+
+  function randomEntry() {
+    if (!window.crypto || !crypto.getRandomValues) throw new Error('Secure randomness is unavailable in this browser.');
+    var requestBytes = crypto.getRandomValues(new Uint8Array(32));
+    var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+    var requestId = Array.from(requestBytes, function (value) { return alphabet[value & 63]; }).join('');
+    return {
+      request_id: requestId,
+      nonce: hex(crypto.getRandomValues(new Uint8Array(32))),
+      choice: 0
+    };
+  }
+
+  function openCard(game, entryState, version) {
+    var card = node('article', 'card');
+    card.append(node('h3', '', 'Dice Derby'), node('div', 'mono muted', game.id));
+    var metrics = node('div', 'metrics');
+    metrics.append(
+      metric('Entry fee', format(game.entry_fee) + ' tokens'),
+      metric('Seats', format(game.entry_count) + ' / ' + format(game.max_entries)),
+      metric('Pot', format(game.pot))
+    );
+    var footer = node('div', 'row wrap');
+    var timer = node('span', 'timer');
+    timer.dataset.close = game.closes_at;
+    timer.dataset.open = game.opens_at;
+    var button = node('button', '', 'Enter · ' + format(game.entry_fee) + ' tokens');
+    button.type = 'button';
+    var message = node('p', 'status');
+    message.setAttribute('role', 'status');
+    var entered = entryState.status === 'fulfilled' && !!entryState.value.entry;
+    var unknown = entryState.status === 'rejected';
+    var full = Number(game.entry_count) >= Number(game.max_entries);
+    button.dataset.blocked = entered || unknown || full ? 'yes' : 'no';
+    if (entered) {
+      button.textContent = 'Entered';
+      pending.delete(game.id);
+    } else if (unknown) {
+      button.textContent = 'Entry unavailable';
+      status(message, 'Could not check your entry. Refresh to retry.', 'error');
+    } else if (full) {
+      button.textContent = 'Round full';
+    }
+    if (!entered && pending.has(game.id)) {
+      status(message, 'An earlier request is unconfirmed. Retry to safely check the same entry.');
+    }
+    button.addEventListener('click', async function () {
+      button.disabled = true;
+      button.dataset.blocked = 'yes';
+      button.textContent = 'Entering…';
+      status(message, '');
+      try {
+        // Keep the same request and nonce after an uncertain network response.
+        if (!pending.has(game.id)) pending.set(game.id, randomEntry());
+        await api(path(game.id) + '/entries', {
+          auth: true,
+          method: 'POST',
+          body: pending.get(game.id)
+        });
+        if (!current(version)) return;
+        pending.delete(game.id);
+        button.textContent = 'Entered';
+        status(message, 'Your seat is confirmed.', 'success');
+        await Promise.all([loadMe(version), loadLedger(version)]);
+      } catch (error) {
+        if (!current(version)) return;
+        status(message, friendly(error), 'error');
+        var terminal = ['already_entered', 'entry_closed', 'round_full', 'idempotency_conflict'].indexOf(error.code) !== -1;
+        if (error.status >= 400 && error.status < 500) pending.delete(game.id);
+        button.dataset.blocked = terminal ? 'yes' : 'no';
+        button.textContent = error.code === 'already_entered' ? 'Entered' : terminal ? 'Entry unavailable' : 'Retry entry';
+        tick();
+      }
+    });
+    footer.append(timer, button);
+    card.append(metrics, footer, message);
+    return card;
+  }
+
+  async function loadOpen(version) {
+    try {
+      var data = await api('/games?state=open&limit=100');
+      if (!current(version)) return;
+      var entries = await Promise.allSettled(data.items.map(function (game) {
+        return api(path(game.id) + '/my-entry', { auth: true });
+      }));
+      if (!current(version)) return;
+      var list = byId('open-list');
+      if (!data.items.length) {
+        empty(list, 'No open rounds right now — check back soon.');
+        return;
+      }
+      list.replaceChildren();
+      data.items.forEach(function (game, index) {
+        list.append(openCard(game, entries[index], version));
+      });
+      tick();
+    } catch (error) {
+      if (current(version)) sectionError(byId('open-list'), error);
+    }
+  }
+
+  async function loadLedger(version) {
+    try {
+      // Follow the sequence cursor so the displayed set is the most recent 100.
+      var items = new Map();
+      var after = 0;
+      var seenCursors = new Set();
+      while (true) {
+        var data = await api('/me/ledger?limit=100&after_seq=' + encodeURIComponent(after), { auth: true });
+        if (!current(version)) return;
+        data.items.forEach(function (item) { items.set(item.seq, item); });
+        if (!data.items.length || data.next_after_seq === null || data.next_after_seq === undefined) break;
+        var next = Number(data.next_after_seq);
+        if (!Number.isFinite(next) || next <= after || seenCursors.has(next)) break;
+        seenCursors.add(next);
+        after = next;
+      }
+      var recent = Array.from(items.values()).sort(function (a, b) { return b.seq - a.seq; }).slice(0, 100);
+      var list = byId('ledger-list');
+      if (!recent.length) {
+        empty(list, 'No transactions yet. Your story starts with your first tokens.');
+        return;
+      }
+      list.replaceChildren();
+      recent.forEach(function (item) {
+        var row = node('div', 'ledger-item');
+        var top = node('div', 'row');
+        var kind = ['grant', 'bet', 'payout', 'refund'].indexOf(item.kind) !== -1 ? item.kind : 'unknown';
+        var negative = kind === 'bet';
+        top.append(
+          node('span', 'badge ' + kind, item.kind),
+          node('strong', 'amount ' + (negative ? '' : 'success'), (negative ? '−' : '+') + format(Math.abs(item.amount)))
+        );
+        var bottom = node('div', 'row small muted');
+        var time = node('time');
+        time.dataset.time = item.created_at;
+        var date = new Date(Number(item.created_at) * 1000);
+        if (!isNaN(date.getTime())) {
+          time.dateTime = date.toISOString();
+          time.title = date.toLocaleString();
+        }
+        bottom.append(node('span', 'mono', item.game_id || 'Account credit'), time);
+        row.append(top, bottom);
+        list.append(row);
+      });
+      tick();
+    } catch (error) {
+      if (current(version)) sectionError(byId('ledger-list'), error);
+    }
+  }
+
+  function dice(values) {
+    var group = node('div', 'dice');
+    group.setAttribute('role', 'img');
+    group.setAttribute('aria-label', 'Dice: ' + values.join(', '));
+    values.forEach(function (value) {
+      var die = node('span', 'die');
+      die.setAttribute('aria-hidden', 'true');
+      if (pipPositions[value]) {
+        pipPositions[value].forEach(function (position) {
+          var pip = node('span', 'pip');
+          pip.style.gridRow = String(Math.floor(position / 3) + 1);
+          pip.style.gridColumn = String(position % 3 + 1);
+          die.append(pip);
+        });
+      } else {
+        die.textContent = '?';
+      }
+      group.append(die);
+    });
+    return group;
+  }
+
+  function leaderboard(outcomes) {
+    var scroll = node('div', 'table-scroll');
+    scroll.tabIndex = 0;
+    scroll.setAttribute('role', 'region');
+    scroll.setAttribute('aria-label', 'Round leaderboard');
+    var table = node('table');
+    var head = node('thead');
+    var headings = node('tr');
+    ['Rank', 'Player', 'Dice', 'Total', 'Payout'].forEach(function (title) {
+      var th = node('th', '', title);
+      th.scope = 'col';
+      headings.append(th);
+    });
+    head.append(headings);
+    var body = node('tbody');
+    var sorted = outcomes.slice().sort(function (a, b) { return b.score - a.score; });
+    var rank = 0;
+    sorted.forEach(function (outcome, index) {
+      if (index === 0 || outcome.score !== sorted[index - 1].score) rank = index + 1;
+      var row = node('tr');
+      var player = node('td', 'mono', shortId(outcome.account_id));
+      player.title = String(outcome.account_id);
+      var rolls = node('td');
+      rolls.append(dice(outcome.result.dice));
+      row.append(
+        node('td', '', rank),
+        player,
+        rolls,
+        node('td', '', outcome.score),
+        node('td', outcome.payout > 0 ? 'gold' : '', format(outcome.payout))
+      );
+      body.append(row);
+    });
+    table.append(head, body);
+    scroll.append(table);
+    return scroll;
+  }
+
+  function hex(bytes) {
+    return Array.from(bytes, function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  function decodeHex(value) {
+    if (typeof value !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(value)) {
+      throw new Error('The revealed seed is not valid hexadecimal.');
+    }
+    return new Uint8Array(value.match(/.{2}/g).map(function (pair) { return parseInt(pair, 16); }));
+  }
+
+  function checkLine(list, label, passed) {
+    list.append(node('li', passed ? 'success' : 'error', label + ': ' + (passed ? 'PASS' : 'FAIL')));
+  }
+
+  async function verify(payload, list, progress) {
+    if (!window.crypto || !crypto.subtle) {
+      throw new Error('Fairness verification requires Web Crypto in a secure HTTPS context.');
+    }
+    var game = payload.game;
+    var seedBytes = decodeHex(payload.seed_reveal);
+    ['rules_version', 'opens_at', 'closes_at', 'entry_fee', 'max_entries'].forEach(function (field) {
+      if (!Number.isSafeInteger(game[field])) throw new Error('Invalid integer field: ' + field);
+    });
+    var commitmentInput = JSON.stringify([
+      'musebook-casino-v1',
+      game.id,
+      'dice',
+      game.rules_version,
+      game.opens_at,
+      game.closes_at,
+      game.entry_fee,
+      game.max_entries,
+      payload.seed_reveal
+    ]);
+    var digest = await crypto.subtle.digest('SHA-256', encoder.encode(commitmentInput));
+    var commitmentOK = hex(new Uint8Array(digest)) === String(game.commitment).toLowerCase();
+    checkLine(list, 'Commitment', commitmentOK);
+    var key = await crypto.subtle.importKey(
+      'raw', seedBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    var allOK = commitmentOK;
+    var seen = new Set();
+    var manifest = payload.manifest;
+    if (!Array.isArray(manifest) || !Array.isArray(payload.outcomes)) {
+      throw new Error('The results manifest or outcomes are missing.');
+    }
+    for (var i = 0; i < manifest.length; i++) {
+      var accountId = manifest[i][0];
+      var rolled = [];
+      status(progress, 'Checking entrant ' + (i + 1) + ' of ' + manifest.length + '…');
+      for (var d = 0; d < 6; d++) {
+        var counter = 0;
+        while (true) {
+          var message = JSON.stringify([
+            'musebook-casino-v1', game.id, payload.manifest_hash,
+            accountId, 'dice/' + d, counter
+          ]);
+          var mac = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+          counter++;
+          var x = new DataView(mac).getUint32(0, false);
+          if (x < 4294967292) {
+            rolled.push(x % 6 + 1);
+            break;
+          }
+        }
+      }
+      var matches = payload.outcomes.filter(function (outcome) { return outcome.account_id === accountId; });
+      var resultDice = matches.length === 1 && matches[0].result && matches[0].result.dice;
+      var passed = !seen.has(accountId) && Array.isArray(resultDice) && resultDice.length === 6 &&
+        rolled.every(function (value, index) { return value === resultDice[index]; });
+      seen.add(accountId);
+      allOK = allOK && passed;
+      checkLine(list, shortId(accountId) + ' · dice', passed);
+    }
+    var complete = payload.outcomes.length === manifest.length &&
+      payload.outcomes.every(function (outcome) { return seen.has(outcome.account_id); });
+    if (!complete) {
+      checkLine(list, 'Manifest / outcome coverage', false);
+      allOK = false;
+    }
+    if (!manifest.length) list.append(node('li', 'muted', 'No entrants to re-roll.'));
+    status(progress, allOK ? 'All requested checks passed.' : 'Verification failed. Review the checks above.', allOK ? 'success' : 'error');
+  }
+
+  function fairnessPanel(payload) {
+    var panel = node('div', 'fairness');
+    var button = node('button', 'secondary', 'Verify fairness');
+    button.type = 'button';
+    var explanation = node('p', 'small muted', 'Recomputes the seed commitment and every entrant’s six dice locally. Uses the supplied manifest hash; does not independently validate that hash or payout allocation.');
+    var progress = node('p', 'status');
+    progress.setAttribute('role', 'status');
+    var checks = node('ul', 'checks');
+    button.addEventListener('click', async function () {
+      button.disabled = true;
+      checks.replaceChildren();
+      status(progress, 'Checking commitment…');
+      try {
+        await verify(payload, checks, progress);
+      } catch (error) {
+        status(progress, 'Verification could not finish: ' + friendly(error), 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Verify again';
+      }
+    });
+    var evidence = node('details');
+    evidence.append(node('summary', 'small muted', 'Seed & commitment'));
+    [
+      ['Commitment', payload.game.commitment],
+      ['Revealed seed', payload.seed_reveal],
+      ['Manifest hash', payload.manifest_hash]
+    ].forEach(function (pair) {
+      evidence.append(node('p', 'small muted', pair[0]), node('p', 'mono', pair[1]));
+    });
+    panel.append(button, explanation, progress, checks, evidence);
+    return panel;
+  }
+
+  async function expandRound(game, body, version) {
+    loading(body);
+    try {
+      var responses = await Promise.allSettled([
+        api(path(game.id) + '/results'),
+        api(path(game.id) + '/my-entry', { auth: true })
+      ]);
+      if (!current(version)) return;
+      if (responses[0].status === 'rejected') throw responses[0].reason;
+      var payload = responses[0].value;
+      if (!payload.game || payload.game.id !== game.id) throw new Error('The results do not match this round.');
+      body.replaceChildren();
+      body.append(node('p', 'small muted', 'Pot: ' + format(payload.pot) + ' tokens · Mode: ' + payload.mode));
+      if (responses[1].status === 'fulfilled') {
+        var entry = responses[1].value.entry;
+        body.append(node('p', 'small ' + (entry ? 'gold' : 'muted'),
+          entry ? 'You entered this round.' : 'You did not enter this round.'));
+      } else {
+        body.append(node('p', 'small error', 'Your entry could not be checked. Reopen this round to retry.'));
+      }
+      if (payload.outcomes.length) body.append(leaderboard(payload.outcomes));
+      else body.append(node('p', 'empty', 'There are no entrant outcomes for this round.'));
+      body.append(fairnessPanel(payload));
+      return responses[1].status === 'fulfilled';
+    } catch (error) {
+      if (current(version)) {
+        body.replaceChildren(node('p', 'status error', friendly(error) + ' Close and reopen this round to retry.'));
+      }
+      return false;
+    }
+  }
+
+  async function loadResults(version) {
+    try {
+      var data = await api('/games?state=settled&limit=100');
+      if (!current(version)) return;
+      var list = byId('results-list');
+      if (!data.items.length) {
+        empty(list, 'No settled rounds yet. The first results are still ahead.');
+        return;
+      }
+      var existing = new Map();
+      Array.from(list.children).forEach(function (element) {
+        if (element.dataset.id) existing.set(element.dataset.id, element);
+      });
+      var fragment = document.createDocumentFragment();
+      data.items.slice().sort(function (a, b) { return b.closes_at - a.closes_at; }).forEach(function (game) {
+        if (existing.has(String(game.id))) {
+          fragment.append(existing.get(String(game.id)));
+          return;
+        }
+        var detail = node('details', 'round');
+        detail.dataset.id = game.id;
+        var summary = node('summary', '', 'Dice Derby · ' + game.id);
+        var date = new Date(game.closes_at * 1000).toLocaleDateString();
+        var sub = node('div', 'summary-sub', date + ' · ' + format(game.pot) + ' tokens · ' + format(game.entry_count) + ' entrants');
+        var body = node('div', 'result-body');
+        var loaded = false;
+        var busy = false;
+        detail.append(summary, sub, body);
+        detail.addEventListener('toggle', async function () {
+          if (!detail.open || loaded || busy || !current(version)) return;
+          busy = true;
+          try { loaded = await expandRound(game, body, version); }
+          finally { busy = false; }
+        });
+        fragment.append(detail);
+      });
+      list.replaceChildren(fragment);
+    } catch (error) {
+      if (current(version)) sectionError(byId('results-list'), error);
+    }
+  }
+
+  async function refresh() {
+    if (!token || refreshTask) return;
+    var version = epoch;
+    var task = {};
+    refreshTask = task;
+    byId('refresh').disabled = true;
+    byId('refresh').textContent = 'Refreshing…';
+    status(byId('notice'), '');
+    try {
+      await Promise.all([
+        loadMe(version),
+        loadOpen(version),
+        loadResults(version),
+        loadLedger(version)
+      ]);
+    } finally {
+      if (refreshTask === task) {
+        refreshTask = null;
+        byId('refresh').disabled = !token;
+        byId('refresh').textContent = 'Refresh';
+      }
+    }
+  }
+
+  function beginSession() {
+    byId('login').hidden = true;
+    byId('refresh').textContent = 'Refresh';
+    loading(byId('open-list'));
+    loading(byId('results-list'));
+    loading(byId('ledger-list'));
+    void refresh();
+  }
+
+  byId('login-form').addEventListener('submit', async function (event) {
+    event.preventDefault();
+    var key = byId('api-key').value.trim();
+    if (!key) {
+      status(byId('login-error'), 'Enter your casino API key.', 'error');
+      return;
+    }
+    var button = byId('login-button');
+    button.disabled = true;
+    button.textContent = 'Getting session…';
+    status(byId('login-error'), '');
+    try {
+      var data = await api('/sessions', { method: 'POST', key: key, body: {} });
+      if (typeof data.token !== 'string' || !data.token) throw new Error('The server did not return a session token.');
+      token = data.token;
+      epoch++;
+      byId('api-key').value = '';
+      var storageFailed = false;
+      try { sessionStorage.setItem(STORAGE, token); }
+      catch (error) { storageFailed = true; }
+      beginSession();
+      if (storageFailed) {
+        status(byId('notice'), 'Signed in. Browser storage is unavailable, so refreshing the page will end this local session.');
+      }
+    } catch (error) {
+      status(byId('login-error'), error.status === 401 ? 'That API key was not accepted.' : friendly(error), 'error');
+    } finally {
+      key = '';
+      button.disabled = false;
+      button.textContent = 'Get session';
+    }
+  });
+
+  byId('logout').addEventListener('click', function () {
+    clearSession('Logged out of this tab.');
+  });
+  byId('refresh').addEventListener('click', function () { void refresh(); });
+
+  try { token = sessionStorage.getItem(STORAGE) || ''; } catch (error) {}
+  if (token) beginSession();
+
+  setInterval(tick, 1000);
+  setInterval(function () { if (token) void refresh(); }, 60000);
+})();
+</script>
+</body>
+</html>
+`;
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
