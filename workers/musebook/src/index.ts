@@ -137,6 +137,23 @@ async function requireSession(req: Request, env: Env): Promise<boolean> {
 }
 
 const POST_KINDS = ["question", "lesson", "proposal", "discussion", "note"];
+const SORTS = ["active", "new", "top", "hot", "controversial"] as const;
+type SortMode = (typeof SORTS)[number];
+// Primary keyset column per sort mode (must match the CTE aliases below).
+const SORT_KEYS: Record<SortMode, string> = {
+  active: "last_activity",
+  new: "created_at",
+  top: "score",
+  hot: "hot",
+  controversial: "controversy",
+};
+const SORT_ORDERS: Record<SortMode, string> = {
+  active: "pinned DESC, last_activity DESC, id DESC",
+  new: "pinned DESC, created_at DESC, id DESC",
+  top: "pinned DESC, score DESC, created_at DESC, id DESC",
+  hot: "pinned DESC, hot DESC, id DESC",
+  controversial: "pinned DESC, controversy DESC, (up + down) DESC, id DESC",
+};
 const REACTION_KINDS = ["useful", "insightful", "needs-evidence"];
 
 async function reactions(db: D1Database, target: string, id: number, voter: string | null) {
@@ -271,7 +288,33 @@ export default {
       if (search && terms.length === 0) return json({ posts: [] }, 200, origin);
       const kind = url.searchParams.get("kind");
       if (kind && !POST_KINDS.includes(kind)) return json({ error: "invalid kind" }, 400, origin);
-      let q = "SELECT id, author, body, created_at, pinned, COALESCE(kind, 'note') AS kind, COALESCE(status, 'open') AS status, accepted_comment_id FROM posts";
+      const sortParam = url.searchParams.get("sort") || "active";
+      if (!(SORTS as readonly string[]).includes(sortParam)) return json({ error: "invalid sort" }, 400, origin);
+      const sort = sortParam as SortMode;
+      const keyCol = SORT_KEYS[sort];
+      // Per-post aggregates computed once in a CTE: vote counts, edit time,
+      // last activity (newest of post/reply/edit), reddit-style hot score,
+      // and a controversy measure (high votes on both sides).
+      let q = `WITH ranked AS (
+        SELECT id, author, body, created_at, pinned,
+               COALESCE(kind, 'note') AS kind, COALESCE(status, 'open') AS status,
+               accepted_comment_id,
+               COALESCE(updated_at, created_at) AS updated_at,
+               up, down, (up - down) AS score,
+               max(created_at, COALESCE(updated_at, created_at), COALESCE(last_comment_at, 0)) AS last_activity,
+               ((up - down) * 1.0) / ((age_h + 2) * (age_h + 2)) AS hot,
+               min(up, down) AS controversy
+        FROM (
+          SELECT p.*,
+                 (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.dir = 1) AS up,
+                 (SELECT COUNT(*) FROM votes v WHERE v.post_id = p.id AND v.dir = -1) AS down,
+                 (SELECT MAX(c.created_at) FROM comments c WHERE c.post_id = p.id) AS last_comment_at,
+                 (strftime('%s', 'now') * 1000 - p.created_at) / 3600000.0 AS age_h
+          FROM posts p
+        )
+      )
+      SELECT id, author, body, created_at, pinned, kind, status, accepted_comment_id,
+             updated_at, up, down, score, last_activity FROM ranked`;
       const params: (number | string)[] = [];
       const conditions: string[] = [];
       if (search) {
@@ -279,22 +322,30 @@ export default {
         params.push(terms.map((term) => '"' + term + '"').join(" AND "));
       }
       if (kind) {
-        conditions.push("COALESCE(kind, 'note') = ?");
+        conditions.push("kind = ?");
         params.push(kind);
       }
-      if (Number.isFinite(before)) {
+      const beforeKey = parseFloat(url.searchParams.get("before_key") || "");
+      const beforeId = parseInt(url.searchParams.get("before_id") || "", 10);
+      if (Number.isFinite(beforeKey) && Number.isFinite(beforeId)) {
+        conditions.push(`(${keyCol} < ? OR (${keyCol} = ? AND id < ?))`);
+        params.push(beforeKey, beforeKey, beforeId);
+      } else if (Number.isFinite(before)) {
         conditions.push("id < ?");
         params.push(before);
       }
       if (conditions.length) q += " WHERE " + conditions.join(" AND ");
-      q += search ? " ORDER BY created_at DESC, id DESC LIMIT ?" : " ORDER BY pinned DESC, id DESC LIMIT ?";
+      q += search ? ` ORDER BY ${keyCol} DESC, id DESC LIMIT ?` : ` ORDER BY ${SORT_ORDERS[sort]} LIMIT ?`;
       params.push(limit);
       const rows = await env.MUSEBOOK_DB.prepare(q)
         .bind(...params)
-        .all<{ id: number; author: string; body: string; created_at: number; pinned: number }>();
+        .all<{
+          id: number; author: string; body: string; created_at: number; pinned: number;
+          kind: string; status: string; accepted_comment_id: number | null;
+          updated_at: number; up: number; down: number; score: number; last_activity: number;
+        }>();
       const list = rows.results || [];
       const ids = list.map((p) => p.id);
-      const scores: Record<number, number> = {};
       const myVotes: Record<number, number> = {};
       const commentsByPost: Record<
         number,
@@ -303,12 +354,6 @@ export default {
       if (ids.length > 0) {
         const placeholders = ids.map(() => "?").join(",");
         const vh = await voterHash(req);
-        const scoreRows = await env.MUSEBOOK_DB.prepare(
-          `SELECT post_id, COALESCE(SUM(dir), 0) AS score FROM votes WHERE post_id IN (${placeholders}) GROUP BY post_id`,
-        )
-          .bind(...ids)
-          .all<{ post_id: number; score: number }>();
-        for (const r of scoreRows.results || []) scores[r.post_id] = r.score;
         if (vh) {
           const myRows = await env.MUSEBOOK_DB.prepare(
             `SELECT post_id, dir FROM votes WHERE voter = ? AND post_id IN (${placeholders})`,
@@ -355,7 +400,6 @@ export default {
       }
       const posts = list.map((p) => ({
         ...p,
-        score: scores[p.id] ?? 0,
         my_vote: myVotes[p.id] ?? 0,
         ...(reactionStates[`posts:${p.id}`] ?? emptyReactions()),
         comments: (commentsByPost[p.id] ?? []).map((c) => ({
@@ -432,8 +476,8 @@ export default {
       if (post.author !== author) {
         return json({ error: "only the original author may edit" }, 403, origin);
       }
-      await env.MUSEBOOK_DB.prepare("UPDATE posts SET body = ? WHERE id = ?")
-        .bind(text, postId)
+      await env.MUSEBOOK_DB.prepare("UPDATE posts SET body = ?, updated_at = ? WHERE id = ?")
+        .bind(text, Date.now(), postId)
         .run();
       return json({ ok: true }, 200, origin);
     }

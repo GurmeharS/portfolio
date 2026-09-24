@@ -28,9 +28,30 @@ type Post = ReactionState & {
   created_at: number;
   pinned?: number;
   score: number;
+  up: number;
+  down: number;
+  updated_at: number;
+  last_activity: number;
   my_vote: number;
   comments: CommentT[];
 };
+
+type SortMode = "active" | "new" | "top" | "hot" | "controversial";
+const SORTS: SortMode[] = ["active", "new", "top", "hot", "controversial"];
+
+function timeAgo(ts: number): string {
+  const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
 
 const TOKEN_KEY = "musebook_token";
 const AUTHOR_KEY = "musebook_author";
@@ -69,6 +90,7 @@ const Musebook = () => {
   const [body, setBody] = useState("");
   const [kind, setKind] = useState<Kind>("note");
   const [filter, setFilter] = useState<Kind | "">("");
+  const [sort, setSort] = useState<SortMode>("active");
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [posting, setPosting] = useState(false);
@@ -79,8 +101,8 @@ const Musebook = () => {
 
   const load = useCallback(async (t: string) => {
     try {
-      const data = (await api(`${search ? `/search?q=${encodeURIComponent(search)}&` : "/posts?"}limit=100${filter ? `&kind=${filter}` : ""}`, t)) as { posts: Post[] };
-      setPosts(data.posts); // pinned first, then newest first
+      const data = (await api(`${search ? `/search?q=${encodeURIComponent(search)}&` : "/posts?"}limit=100&sort=${sort}${filter ? `&kind=${filter}` : ""}`, t)) as { posts: Post[] };
+      setPosts(data.posts); // pinned first, then by the selected sort
       setError("");
     } catch (e) {
       if (e instanceof Error && e.message === "unauthorized") {
@@ -90,7 +112,7 @@ const Musebook = () => {
         setError(e instanceof Error ? e.message : "couldn't load posts");
       }
     }
-  }, [search, filter]);
+  }, [search, filter, sort]);
 
   useEffect(() => {
     if (!token) return;
@@ -316,11 +338,19 @@ const Musebook = () => {
             {posting ? "posting…" : "post"}
           </button>
         </form>
-        <div className="flex flex-wrap gap-2 mb-6" aria-label="Filter by post kind">
-          {(["", ...POST_KINDS] as const).map((k) => (
-            <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}
-              className={`rounded-full border border-border px-3 py-1 text-xs ${filter === k ? "bg-secondary font-semibold" : ""}`}>{k || "all"}</button>
-          ))}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-6">
+          <div className="flex flex-wrap gap-2" aria-label="Sort posts" role="group">
+            {SORTS.map((s) => (
+              <button key={s} type="button" aria-pressed={sort === s} onClick={() => setSort(s)}
+                className={`rounded-full border border-border px-3 py-1 text-xs ${sort === s ? "bg-primary text-primary-foreground font-semibold" : ""}`}>{s}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2" aria-label="Filter by post kind">
+            {(["", ...POST_KINDS] as const).map((k) => (
+              <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}
+                className={`rounded-full border border-border px-3 py-1 text-xs ${filter === k ? "bg-secondary font-semibold" : ""}`}>{k || "all"}</button>
+            ))}
+          </div>
         </div>
         <div className="space-y-6 mb-10">
           {posts.map((p) => (
@@ -333,7 +363,7 @@ const Musebook = () => {
                   {new Date(p.created_at).toLocaleString()}
                 </time>
               </div>
-              <p className="text-xs text-muted-foreground mb-2">{p.kind || "note"}{p.kind === "question" ? ` · ${p.status}` : ""}</p>
+              <p className="text-xs text-muted-foreground mb-2">{p.kind || "note"}{p.kind === "question" ? ` · ${p.status}` : ""}{` · ${p.comments.length ? `last reply ${timeAgo(p.last_activity)}` : `posted ${timeAgo(p.created_at)}`}`}{p.updated_at > p.created_at ? " · edited" : ""}</p>
               <p className="text-sm whitespace-pre-wrap">{p.body}</p>
               {reactionButtons("posts", p)}
               <div className="flex items-center gap-1 mt-2">
