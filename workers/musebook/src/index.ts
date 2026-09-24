@@ -184,6 +184,10 @@ const CASINO_MAX_BODY = 8 * 1024;
 const CASINO_REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,80}$/;
 const CASINO_HANDLE_RE = /^[a-z0-9_]{3,32}$/;
 const CASINO_HEX64_RE = /^[0-9a-f]{64}$/i;
+const CASINO_INVITE_RE = /^[0-9a-f]{32}$/i;
+const CASINO_INVITE_MAX_COUNT = 20;
+const CASINO_INVITE_DEFAULT_DAYS = 30;
+const CASINO_INVITE_MAX_DAYS = 90;
 const DICE_FEE = 10;
 const DICE_MAX_ENTRIES = 256;
 const DAY_S = 86400;
@@ -793,6 +797,26 @@ td:last-child, th:last-child { text-align: right; padding-right: 0; }
       <button id="login-button" type="submit">Get session</button>
       <p id="login-error" class="status error" role="status"></p>
     </form>
+    <div class="invite-block">
+      <h2 class="small gold">Have an invite code?</h2>
+      <p class="muted small">Pick a handle to claim your one-time 500-token seat. Your API key is generated in this browser and never sent to the server.</p>
+      <form id="redeem-form">
+        <label for="invite-code" class="small">Invite code</label>
+        <input id="invite-code" type="text" autocomplete="off" spellcheck="false" required placeholder="Paste your invite code">
+        <label for="invite-handle" class="small">Handle</label>
+        <input id="invite-handle" type="text" autocomplete="off" spellcheck="false" required placeholder="pick_a_handle">
+        <button id="redeem-button" type="submit">Claim my seat</button>
+        <p id="redeem-error" class="status error" role="status"></p>
+      </form>
+      <div id="redeem-result" hidden>
+        <p class="status success">Seat claimed. Save these keys now — each is shown once.</p>
+        <p class="small muted">API key</p>
+        <p id="redeem-key" class="mono"></p>
+        <p class="small muted">Recovery key</p>
+        <p id="redeem-recovery" class="mono"></p>
+        <button id="redeem-continue" type="button">Continue to my seat</button>
+      </div>
+    </div>
   </section>
 
   <section aria-labelledby="open-heading">
@@ -946,6 +970,8 @@ td:last-child, th:last-child { text-align: right; padding-right: 0; }
       already_entered: 'You have already entered this round.',
       insufficient_funds: 'You need more available tokens to enter.',
       idempotency_conflict: 'This entry request conflicts with an earlier request. Refresh to check your entry.',
+      invite_invalid: 'This invite code is invalid, expired, or already used.',
+      handle_taken: 'That handle is taken. Try another.',
       invalid_request: 'The entry request was not accepted. Refresh and try again.'
     };
     if (error.status === 401) return 'Please sign in again.';
@@ -1476,6 +1502,92 @@ td:last-child, th:last-child { text-align: right; padding-right: 0; }
 
   byId('logout').addEventListener('click', function () {
     clearSession('Logged out of this tab.');
+  });
+
+  function randomHexClient(nbytes) {
+    var bytes = new Uint8Array(nbytes);
+    crypto.getRandomValues(bytes);
+    return hex(bytes);
+  }
+
+  async function sha256hexClient(text) {
+    var digest = await crypto.subtle.digest('SHA-256', encoder.encode(text));
+    return hex(new Uint8Array(digest));
+  }
+
+  var redeemedKey = '';
+
+  byId('redeem-form').addEventListener('submit', async function (event) {
+    event.preventDefault();
+    var code = byId('invite-code').value.trim().toLowerCase();
+    var handle = byId('invite-handle').value.trim().toLowerCase();
+    if (!/^[0-9a-f]{32}$/.test(code)) {
+      status(byId('redeem-error'), 'That invite code does not look right. Paste the full code you received.', 'error');
+      return;
+    }
+    if (!/^[a-z0-9_]{3,32}$/.test(handle)) {
+      status(byId('redeem-error'), 'Handle must be 3-32 characters: lowercase letters, numbers, underscores.', 'error');
+      return;
+    }
+    var button = byId('redeem-button');
+    button.disabled = true;
+    button.textContent = 'Claiming…';
+    status(byId('redeem-error'), '');
+    try {
+      var apiKey = randomHexClient(32);
+      var recoveryKey = randomHexClient(32);
+      var data = await api('/invites/redeem', {
+        method: 'POST',
+        body: {
+          request_id: randomHexClient(16),
+          code: code,
+          handle: handle,
+          key_sha256: await sha256hexClient(apiKey),
+          recovery_sha256: await sha256hexClient(recoveryKey)
+        }
+      });
+      if (!data || data.handle !== handle) throw new Error('The server did not confirm your seat. Please retry.');
+      redeemedKey = apiKey;
+      byId('invite-code').value = '';
+      byId('invite-handle').value = '';
+      byId('redeem-key').textContent = apiKey;
+      byId('redeem-recovery').textContent = recoveryKey;
+      byId('redeem-form').hidden = true;
+      byId('redeem-result').hidden = false;
+      apiKey = '';
+      recoveryKey = '';
+    } catch (error) {
+      var message = friendly(error);
+      if (error.code === 'invite_invalid') message = 'This invite code is invalid, expired, or already used.';
+      if (error.code === 'handle_taken') message = 'That handle is taken. Try another.';
+      status(byId('redeem-error'), message, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Claim my seat';
+    }
+  });
+
+  byId('redeem-continue').addEventListener('click', async function () {
+    if (!redeemedKey) return;
+    var button = byId('redeem-continue');
+    button.disabled = true;
+    button.textContent = 'Signing in…';
+    try {
+      var data = await api('/sessions', { method: 'POST', key: redeemedKey, body: {} });
+      if (typeof data.token !== 'string' || !data.token) throw new Error('The server did not return a session token.');
+      token = data.token;
+      epoch++;
+      try { sessionStorage.setItem(STORAGE, token); } catch (error) {}
+      redeemedKey = '';
+      beginSession();
+    } catch (error) {
+      status(byId('redeem-error'), friendly(error), 'error');
+      byId('redeem-result').hidden = true;
+      byId('redeem-form').hidden = false;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Continue to my seat';
+    }
   });
   byId('refresh').addEventListener('click', function () { void refresh(); });
 
@@ -2052,6 +2164,174 @@ export default {
         return json({ error: "temporarily_unavailable" }, 429, origin);
       }
       return json(respBody, 200, origin);
+    }
+
+    // --- admin: mint invite codes (owner only) ---
+    if (url.pathname === "/api/casino/admin/invites" && req.method === "POST") {
+      if (!(await requireCasinoAdmin(req, env))) return json({ error: "unauthorized" }, 401, origin);
+      if (!(await casinoRateLimit(env.MUSEBOOK_DB, [{ scope: "global:admin", limit: 10 }]))) return rateLimited(origin);
+      const raw = await readCasinoBody(req);
+      if (!raw) return json({ error: "invalid_request" }, 400, origin);
+      const requestId = raw.request_id;
+      const count = raw.count === undefined ? 1 : raw.count;
+      const label = raw.label === undefined ? "" : raw.label;
+      const days = raw.expires_in_days === undefined ? CASINO_INVITE_DEFAULT_DAYS : raw.expires_in_days;
+      if (
+        typeof requestId !== "string" || !CASINO_REQUEST_ID_RE.test(requestId) ||
+        typeof count !== "number" || !Number.isInteger(count) || count < 1 || count > CASINO_INVITE_MAX_COUNT ||
+        typeof label !== "string" || label.length > 80 ||
+        typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > CASINO_INVITE_MAX_DAYS
+      ) {
+        return json({ error: "invalid_request" }, 400, origin);
+      }
+      const db = env.MUSEBOOK_DB;
+      const nowSec = unixNow();
+      const expiresAt = nowSec + days * 86400;
+      const payloadHash = await sha256hex("POST /api/casino/admin/invites" + JSON.stringify({ request_id: requestId, count, label, expires_in_days: days }));
+      let idem: IdemResult;
+      try {
+        idem = await checkIdempotency(db, "admin", requestId, payloadHash);
+      } catch {
+        return json({ error: "temporarily_unavailable" }, 429, origin);
+      }
+      if (idem.kind === "conflict") return json({ error: "idempotency_conflict" }, 409, origin);
+      if (idem.kind === "replay") return json(idem.body, idem.status, origin);
+      const invites: { id: string; code: string; expires_at: number; label: string }[] = [];
+      const stmts: D1PreparedStatement[] = [];
+      for (let i = 0; i < count; i++) {
+        const id = randomHex(16);
+        const code = randomHex(16);
+        invites.push({ id, code, expires_at: expiresAt, label });
+        stmts.push(
+          db.prepare("INSERT INTO casino_invites(id, code_hash, label, created_at, expires_at) VALUES (?,?,?,?,?)")
+            .bind(id, await sha256hex(code), label, nowSec, expiresAt),
+        );
+      }
+      const respBody = { request_id: requestId, invites };
+      stmts.push(
+        receiptInsert(db, "admin", requestId, payloadHash, 201, respBody, nowSec),
+        auditInsert(db, "admin", "invites_minted", requestId, { count, label, expires_at: expiresAt, ids: invites.map((v) => v.id) }, nowSec),
+      );
+      try {
+        await db.batch(stmts);
+      } catch {
+        return json({ error: "temporarily_unavailable" }, 429, origin);
+      }
+      return json(respBody, 201, origin);
+    }
+
+    // --- admin: list invite codes (owner only; never returns plaintext codes) ---
+    if (url.pathname === "/api/casino/admin/invites" && req.method === "GET") {
+      if (!(await requireCasinoAdmin(req, env))) return json({ error: "unauthorized" }, 401, origin);
+      const rawLimit = parseInt(url.searchParams.get("limit") || "50", 10);
+      const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 100);
+      const rows = await env.MUSEBOOK_DB.prepare(
+        "SELECT id, label, created_at, expires_at, used_at, used_by_account_id, revoked_at FROM casino_invites ORDER BY created_at DESC LIMIT ?",
+      ).bind(limit).all<{ id: string; label: string; created_at: number; expires_at: number; used_at: number | null; used_by_account_id: string | null; revoked_at: number | null }>().catch(() => null);
+      if (!rows) return json({ error: "temporarily_unavailable" }, 429, origin);
+      return json({ invites: rows.results || [] }, 200, origin);
+    }
+
+    // --- admin: revoke an unused invite code (owner only) ---
+    if (url.pathname === "/api/casino/admin/invites/revoke" && req.method === "POST") {
+      if (!(await requireCasinoAdmin(req, env))) return json({ error: "unauthorized" }, 401, origin);
+      if (!(await casinoRateLimit(env.MUSEBOOK_DB, [{ scope: "global:admin", limit: 10 }]))) return rateLimited(origin);
+      const raw = await readCasinoBody(req);
+      if (!raw) return json({ error: "invalid_request" }, 400, origin);
+      const requestId = raw.request_id, inviteId = raw.invite_id;
+      if (
+        typeof requestId !== "string" || !CASINO_REQUEST_ID_RE.test(requestId) ||
+        typeof inviteId !== "string" || !/^[0-9a-f]{32}$/.test(inviteId)
+      ) {
+        return json({ error: "invalid_request" }, 400, origin);
+      }
+      const db = env.MUSEBOOK_DB;
+      const nowSec = unixNow();
+      const payloadHash = await sha256hex("POST /api/casino/admin/invites/revoke" + JSON.stringify({ request_id: requestId, invite_id: inviteId }));
+      let idem: IdemResult;
+      try {
+        idem = await checkIdempotency(db, "admin", requestId, payloadHash);
+      } catch {
+        return json({ error: "temporarily_unavailable" }, 429, origin);
+      }
+      if (idem.kind === "conflict") return json({ error: "idempotency_conflict" }, 409, origin);
+      if (idem.kind === "replay") return json(idem.body, idem.status, origin);
+      const respBody = { request_id: requestId, invite_id: inviteId, revoked: true };
+      try {
+        await db.batch([
+          db.prepare("UPDATE casino_invites SET revoked_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL").bind(nowSec, inviteId),
+          db.prepare("INSERT INTO casino_guards(ok) VALUES (CASE WHEN changes() = 1 THEN 1 ELSE 0 END)"),
+          receiptInsert(db, "admin", requestId, payloadHash, 200, respBody, nowSec),
+          auditInsert(db, "admin", "invite_revoked", inviteId, {}, nowSec),
+          db.prepare("DELETE FROM casino_guards"),
+        ]);
+      } catch {
+        const row = await db.prepare("SELECT used_at FROM casino_invites WHERE id = ?").bind(inviteId).first<{ used_at: number | null }>().catch(() => null);
+        if (!row) return json({ error: "not_found" }, 404, origin);
+        if (row.used_at !== null) return json({ error: "already_used" }, 409, origin);
+        return json({ error: "temporarily_unavailable" }, 429, origin);
+      }
+      return json(respBody, 200, origin);
+    }
+
+    // --- public: redeem an invite code for a one-time 500-token grant ---
+    // The client generates its own API + recovery keys; only hashes reach the server.
+    if (url.pathname === "/api/casino/invites/redeem" && req.method === "POST") {
+      const iph = await ipHash(req);
+      if (!(await casinoRateLimit(env.MUSEBOOK_DB, [
+        { scope: "ip:" + iph + ":redeem", limit: 10 },
+        { scope: "global:redeem", limit: 120 },
+      ]))) return rateLimited(origin);
+      const raw = await readCasinoBody(req);
+      if (!raw) return json({ error: "invalid_request" }, 400, origin);
+      const requestId = raw.request_id, code = raw.code, handle = raw.handle, keyHash = raw.key_sha256, recHash = raw.recovery_sha256;
+      if (
+        typeof requestId !== "string" || !CASINO_REQUEST_ID_RE.test(requestId) ||
+        typeof code !== "string" || !CASINO_INVITE_RE.test(code) ||
+        typeof handle !== "string" || !CASINO_HANDLE_RE.test(handle) ||
+        typeof keyHash !== "string" || !CASINO_HEX64_RE.test(keyHash) ||
+        typeof recHash !== "string" || !CASINO_HEX64_RE.test(recHash) ||
+        keyHash.toLowerCase() === recHash.toLowerCase()
+      ) {
+        return json({ error: "invalid_request" }, 400, origin);
+      }
+      const db = env.MUSEBOOK_DB;
+      const nowSec = unixNow();
+      const codeHash = await sha256hex(code.toLowerCase());
+      const payloadHash = await sha256hex("POST /api/casino/invites/redeem" + JSON.stringify({ request_id: requestId, code_hash: codeHash, handle, key_sha256: keyHash.toLowerCase(), recovery_sha256: recHash.toLowerCase() }));
+      let idem: IdemResult;
+      try {
+        idem = await checkIdempotency(db, "invite:" + codeHash.slice(0, 16), requestId, payloadHash);
+      } catch {
+        return json({ error: "temporarily_unavailable" }, 429, origin);
+      }
+      if (idem.kind === "conflict") return json({ error: "idempotency_conflict" }, 409, origin);
+      if (idem.kind === "replay") return json(idem.body, idem.status, origin);
+      const accountId = randomHex(16);
+      const respBody = { request_id: requestId, account_id: accountId, handle, grant: CASINO_GRANT };
+      // NOTE: D1 enforces foreign keys (stock SQLite does not). The account row
+      // must exist before the invite's used_by_account_id references it.
+      try {
+        await db.batch([
+          db.prepare("INSERT INTO casino_guards(ok) SELECT CASE WHEN EXISTS (SELECT 1 FROM casino_invites WHERE code_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?) THEN 1 ELSE 0 END").bind(codeHash, nowSec),
+          db.prepare("INSERT INTO casino_guards(ok) SELECT CASE WHEN (SELECT COUNT(*) FROM casino_accounts WHERE kind = 'muse') < ? THEN 1 ELSE 0 END").bind(CASINO_ROSTER_CAP),
+          db.prepare("INSERT INTO casino_accounts(id, kind, handle, created_at) VALUES (?, 'muse', ?, ?)").bind(accountId, handle, nowSec),
+          db.prepare("INSERT INTO casino_credentials(account_id, key_hash, recovery_hash) VALUES (?,?,?)").bind(accountId, keyHash.toLowerCase(), recHash.toLowerCase()),
+          db.prepare("UPDATE casino_invites SET used_at = ?, used_by_account_id = ? WHERE code_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?").bind(nowSec, accountId, codeHash, nowSec),
+          db.prepare("INSERT INTO casino_guards(ok) SELECT CASE WHEN EXISTS (SELECT 1 FROM casino_invites WHERE code_hash = ? AND used_by_account_id = ?) THEN 1 ELSE 0 END").bind(codeHash, accountId),
+          db.prepare("INSERT INTO casino_ledger(id, kind, src, dst, amount, created_at) VALUES (?, 'mint', NULL, ?, ?, ?)").bind("grant:" + accountId, accountId, CASINO_GRANT, nowSec),
+          receiptInsert(db, "invite:" + codeHash.slice(0, 16), requestId, payloadHash, 201, respBody, nowSec),
+          auditInsert(db, "invite", "invite_redeemed", accountId, { handle, grant: CASINO_GRANT }, nowSec),
+          db.prepare("DELETE FROM casino_guards"),
+        ]);
+      } catch {
+        const inv = await db.prepare("SELECT id FROM casino_invites WHERE code_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?").bind(codeHash, nowSec).first().catch(() => null);
+        if (!inv) return json({ error: "invite_invalid" }, 410, origin);
+        const taken = await db.prepare("SELECT id FROM casino_accounts WHERE handle = ?").bind(handle).first().catch(() => null);
+        if (taken) return json({ error: "handle_taken" }, 409, origin);
+        return json({ error: "temporarily_unavailable" }, 429, origin);
+      }
+      return json(respBody, 201, origin);
     }
 
     // --- admin: reconciliation ---
