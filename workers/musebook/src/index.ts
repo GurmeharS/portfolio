@@ -845,6 +845,43 @@ td:last-child, th:last-child { text-align: right; padding-right: 0; }
     <p>Rounds stay open for about 24 hours and settle automatically. A seed commitment is published at least an hour before opening; the seed is revealed at settlement so you can verify the commitment and every roll.</p>
     <p>For our community, for play. These are play-money tokens.</p>
   </section>
+
+  <section class="card" aria-labelledby="owner-heading">
+    <h2 id="owner-heading" class="small gold">Owner</h2>
+    <div id="owner-lock">
+      <p class="muted small">Mint and revoke invite codes. Your admin key stays in this tab only and is never stored on the server.</p>
+      <form id="owner-unlock-form">
+        <label for="owner-key" class="small">Admin key</label>
+        <input id="owner-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your admin key">
+        <button id="owner-unlock" type="submit">Unlock owner panel</button>
+        <p id="owner-error" class="status error" role="status"></p>
+      </form>
+    </div>
+    <div id="owner-panel" hidden>
+      <h3 class="small gold">Mint invite codes</h3>
+      <form id="mint-form">
+        <label for="mint-count" class="small">How many</label>
+        <input id="mint-count" type="number" inputmode="numeric" min="1" max="20" value="1" required>
+        <label for="mint-label" class="small">Label (optional)</label>
+        <input id="mint-label" type="text" autocomplete="off" spellcheck="false" maxlength="64" placeholder="e.g. friday-night">
+        <label for="mint-expiry" class="small">Expires in days</label>
+        <input id="mint-expiry" type="number" inputmode="numeric" min="1" max="90" value="30" required>
+        <button id="mint-button" type="submit">Mint codes</button>
+        <p id="mint-error" class="status error" role="status"></p>
+      </form>
+      <div id="mint-result" hidden>
+        <p class="status success">Minted. Each code is shown once — copy them now.</p>
+        <div id="mint-codes" class="stack"></div>
+        <button id="mint-more" class="secondary small" type="button">Mint more</button>
+      </div>
+      <div class="section-head">
+        <h3 class="small gold">Invite codes</h3>
+        <button id="invites-refresh" class="secondary small" type="button">Refresh</button>
+      </div>
+      <p id="invites-error" class="status error" role="status"></p>
+      <div id="invites-list" class="stack"></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -1589,6 +1626,158 @@ td:last-child, th:last-child { text-align: right; padding-right: 0; }
       button.textContent = 'Continue to my seat';
     }
   });
+  // ---- Owner panel: invite code administration ----
+  var OWNER_STORAGE = 'musebook-casino-owner-key';
+  var ownerKey = '';
+
+  function ownerCall(url, options) {
+    options = options || {};
+    options.key = ownerKey;
+    return api(url, options);
+  }
+
+  function renderInvites(invites) {
+    var list = byId('invites-list');
+    list.textContent = '';
+    if (!invites || invites.length === 0) {
+      empty(list, 'No invite codes yet. Mint some above.');
+      return;
+    }
+    invites.forEach(function (invite) {
+      var row = document.createElement('div');
+      row.className = 'card';
+      var claimed = !!invite.used_at;
+      var revoked = !!invite.revoked_at;
+      var stateText = revoked ? 'Revoked' : (claimed ? 'Claimed' : 'Unused');
+      var expires = invite.expires_at ? new Date(invite.expires_at * 1000).toLocaleDateString() : 'never';
+      var created = invite.created_at ? new Date(invite.created_at * 1000).toLocaleDateString() : '';
+      var title = document.createElement('p');
+      title.className = 'mono';
+      title.textContent = invite.label ? invite.label : '(no label)';
+      var meta = document.createElement('p');
+      meta.className = 'small muted';
+      meta.textContent = stateText + ' · created ' + created + ' · expires ' + expires;
+      row.appendChild(title);
+      row.appendChild(meta);
+      if (!revoked && !claimed) {
+        var revoke = document.createElement('button');
+        revoke.className = 'secondary small';
+        revoke.type = 'button';
+        revoke.textContent = 'Revoke';
+        revoke.addEventListener('click', function () {
+          revoke.disabled = true;
+          status(byId('invites-error'), '');
+          ownerCall('/admin/invites/revoke', {
+            method: 'POST',
+            body: { request_id: randomHexClient(16), invite_id: invite.id }
+          }).then(function () { return refreshInvites(); })
+            .catch(function (error) {
+              status(byId('invites-error'), friendly(error), 'error');
+              revoke.disabled = false;
+            });
+        });
+        row.appendChild(revoke);
+      }
+      list.appendChild(row);
+    });
+  }
+
+  function refreshInvites() {
+    status(byId('invites-error'), '');
+    return ownerCall('/admin/invites')
+      .then(function (data) { renderInvites(data.invites); })
+      .catch(function (error) {
+        status(byId('invites-error'), error.status === 401 ? 'That admin key was not accepted.' : friendly(error), 'error');
+      });
+  }
+
+  byId('owner-unlock-form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var entered = byId('owner-key').value.trim();
+    status(byId('owner-error'), '');
+    if (!entered) { status(byId('owner-error'), 'Paste your admin key to continue.', 'error'); return; }
+    ownerKey = entered;
+    ownerCall('/admin/invites')
+      .then(function (data) {
+        try { sessionStorage.setItem(OWNER_STORAGE, ownerKey); } catch (error) {}
+        byId('owner-lock').hidden = true;
+        byId('owner-panel').hidden = false;
+        byId('owner-key').value = '';
+        renderInvites(data.invites);
+      })
+      .catch(function (error) {
+        ownerKey = '';
+        status(byId('owner-error'), error.status === 401 ? 'That admin key was not accepted.' : friendly(error), 'error');
+      });
+  });
+
+  byId('mint-form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var count = parseInt(byId('mint-count').value, 10);
+    var label = byId('mint-label').value.trim();
+    var days = parseInt(byId('mint-expiry').value, 10);
+    status(byId('mint-error'), '');
+    if (!(count >= 1 && count <= 20)) { status(byId('mint-error'), 'Count must be between 1 and 20.', 'error'); return; }
+    if (!(days >= 1 && days <= 90)) { status(byId('mint-error'), 'Expiry must be between 1 and 90 days.', 'error'); return; }
+    var button = byId('mint-button');
+    button.disabled = true;
+    button.textContent = 'Minting…';
+    ownerCall('/admin/invites', {
+      method: 'POST',
+      body: { request_id: randomHexClient(16), count: count, label: label, expires_in_days: days }
+    }).then(function (data) {
+      var codes = byId('mint-codes');
+      codes.textContent = '';
+      (data.invites || []).forEach(function (invite) {
+        var row = document.createElement('div');
+        var code = document.createElement('p');
+        code.className = 'mono';
+        code.textContent = invite.code;
+        var copy = document.createElement('button');
+        copy.className = 'secondary small';
+        copy.type = 'button';
+        copy.textContent = 'Copy';
+        copy.addEventListener('click', function () {
+          var done = function () { copy.textContent = 'Copied'; };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(invite.code).then(done, done);
+          } else { done(); }
+        });
+        row.appendChild(code);
+        row.appendChild(copy);
+        codes.appendChild(row);
+      });
+      byId('mint-result').hidden = false;
+      byId('mint-form').hidden = true;
+      return refreshInvites();
+    }).catch(function (error) {
+      status(byId('mint-error'), error.status === 401 ? 'That admin key was not accepted.' : friendly(error), 'error');
+    }).then(function () {
+      button.disabled = false;
+      button.textContent = 'Mint codes';
+    });
+  });
+
+  byId('invites-refresh').addEventListener('click', function () { void refreshInvites(); });
+
+  byId('mint-more').addEventListener('click', function () {
+    byId('mint-result').hidden = true;
+    byId('mint-form').hidden = false;
+    byId('mint-codes').textContent = '';
+  });
+
+  try { ownerKey = sessionStorage.getItem(OWNER_STORAGE) || ''; } catch (error) {}
+  if (ownerKey) {
+    ownerCall('/admin/invites').then(function (data) {
+      byId('owner-lock').hidden = true;
+      byId('owner-panel').hidden = false;
+      renderInvites(data.invites);
+    }, function () {
+      ownerKey = '';
+      try { sessionStorage.removeItem(OWNER_STORAGE); } catch (error) {}
+    });
+  }
+
   byId('refresh').addEventListener('click', function () { void refresh(); });
 
   try { token = sessionStorage.getItem(STORAGE) || ''; } catch (error) {}
