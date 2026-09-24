@@ -194,6 +194,21 @@ const DICE_MAX_ENTRIES = 256;
 // round closes this many seconds later (never later than its natural close).
 // Documented publicly on the site; deterministic, not operator discretion.
 const DICE_RAPID_SECONDS = 120;
+// Rolling table: each round runs this long; the next opens the moment one closes.
+const DICE_ROLLING_SECONDS = 86400;
+
+// Commitment preimage. v1 bound the round timing (opens_at/closes_at); v2
+// commits only the seed to the round identity and stakes, so the table can
+// run back-to-back with early rapid closes without invalidating the proof.
+// Fairness still holds: a round's commitment is published before the previous
+// round closes, hence before any entry on it can exist (auditable via the
+// round_provisioned / round_closed rows).
+async function diceCommitment(gameId: string, rulesVersion: number, opensAt: number, closesAt: number, entryFee: number, seedHex: string): Promise<string> {
+  const preimage = rulesVersion === 1
+    ? ["musebook-casino-v1", gameId, "dice", 1, opensAt, closesAt, entryFee, DICE_MAX_ENTRIES, seedHex]
+    : ["musebook-casino-v1", gameId, "dice", 2, entryFee, DICE_MAX_ENTRIES, seedHex];
+  return sha256hex(JSON.stringify(preimage));
+}
 const DAY_S = 86400;
 const CASINO_SESSION_DAYS = 30;
 
@@ -406,46 +421,78 @@ async function lockedTokens(db: D1Database, accountId: string): Promise<number> 
 
 // Provision today's and tomorrow's Dice Derby rounds. Never creates a round
 // retroactively or with a shortened entry window (commitment >= 1h before open).
-async function provisionDiceRounds(db: D1Database, env: Env, nowSec: number): Promise<void> {
+// Rolling table: there is always exactly one live dice round. Rounds are
+// numbered sequentially (dice:1, dice:2, ...). The next round is provisioned
+// (seed committed) while the current one is still live, and opens the moment
+// the current one closes — including early rapid closes. Test rounds are
+// excluded from the constancy invariant.
+async function nextRollingId(db: D1Database): Promise<string> {
+  const rows = await db.prepare("SELECT id FROM casino_games WHERE kind = 'dice' AND id LIKE 'dice:%' AND id NOT LIKE '%test%'").all<{ id: string }>();
+  let max = 0;
+  for (const r of rows.results || []) {
+    const m = /^dice:(\d+)$/.exec(r.id);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "dice:" + (max + 1);
+}
+
+async function provisionRollingRound(db: D1Database, env: Env, nowSec: number, opensAt: number, closesAtOpt?: number): Promise<string> {
   const seedKey = casinoSeedKey(env);
-  if (!CASINO_HEX64_RE.test(seedKey)) return;
-  for (const offset of [0, 1]) {
-    const d = new Date((nowSec + offset * DAY_S) * 1000);
-    const parts = d.toISOString().slice(0, 10).split("-").map(Number);
-    const opensAt = Date.UTC(parts[0], parts[1] - 1, parts[2]) / 1000;
-    if (nowSec > opensAt - 3600) continue;
-    const id = "dice:" + d.toISOString().slice(0, 10);
-    const exists = await db.prepare("SELECT id FROM casino_games WHERE id = ?").bind(id).first();
-    if (exists) continue;
-    const closesAt = opensAt + DAY_S;
-    const seed = new Uint8Array(32);
-    crypto.getRandomValues(seed);
-    const seedHex = bytesToHex(seed);
-    const commitment = await sha256hex(
-      JSON.stringify(["musebook-casino-v1", id, "dice", 1, opensAt, closesAt, DICE_FEE, DICE_MAX_ENTRIES, seedHex]),
-    );
-    const sealed = await sealSeed(seedKey, seed, id);
-    const escrowId = "escrow:" + id;
-    await db.batch([
-      db.prepare("INSERT INTO casino_accounts(id, kind, created_at) VALUES (?, 'escrow', ?)").bind(escrowId, nowSec),
-      db
-        .prepare(
-          "INSERT INTO casino_games(id, kind, rules_version, escrow_id, opens_at, closes_at, created_at, entry_fee, max_entries, commitment, seed_box, state) " +
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?, 'open')",
-        )
-        .bind(id, "dice", 1, escrowId, opensAt, closesAt, nowSec, DICE_FEE, DICE_MAX_ENTRIES, commitment, JSON.stringify({ kid: "v1", iv: sealed.iv, ct: sealed.ct })),
-      auditInsert(db, "system", "round_provisioned", id, { kind: "dice", opens_at: opensAt, closes_at: closesAt }, nowSec),
-    ]);
+  if (!CASINO_HEX64_RE.test(seedKey)) throw new Error("no_seed_key");
+  const id = await nextRollingId(db);
+  const closesAt = closesAtOpt ?? opensAt + DICE_ROLLING_SECONDS;
+  const seed = new Uint8Array(32);
+  crypto.getRandomValues(seed);
+  const seedHex = bytesToHex(seed);
+  const commitment = await diceCommitment(id, 2, opensAt, closesAt, DICE_FEE, seedHex);
+  const sealed = await sealSeed(seedKey, seed, id);
+  const escrowId = "escrow:" + id;
+  await db.batch([
+    db.prepare("INSERT INTO casino_accounts(id, kind, created_at) VALUES (?, 'escrow', ?)").bind(escrowId, nowSec),
+    db.prepare(
+      "INSERT INTO casino_games(id, kind, rules_version, escrow_id, opens_at, closes_at, created_at, entry_fee, max_entries, commitment, seed_box, state) " +
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?, 'open')",
+    ).bind(id, "dice", 2, escrowId, opensAt, closesAt, nowSec, DICE_FEE, DICE_MAX_ENTRIES, commitment, JSON.stringify({ kid: "v1", iv: sealed.iv, ct: sealed.ct })),
+    auditInsert(db, "system", "round_provisioned", id, { kind: "dice", rules_version: 2, opens_at: opensAt, closes_at: closesAt }, nowSec),
+  ]);
+  return id;
+}
+
+async function ensureConstantTable(db: D1Database, env: Env, nowSec: number): Promise<void> {
+  const notTest = "AND id NOT LIKE '%test%'";
+  const live = await db.prepare(
+    `SELECT id, closes_at FROM casino_games WHERE kind = 'dice' AND state = 'open' AND opens_at <= ? ${notTest} ORDER BY opens_at LIMIT 1`,
+  ).bind(nowSec).first<{ id: string; closes_at: number }>().catch(() => null);
+  const queued = await db.prepare(
+    `SELECT id, rules_version, opens_at FROM casino_games WHERE kind = 'dice' AND state = 'open' AND opens_at > ? ${notTest} ORDER BY opens_at LIMIT 1`,
+  ).bind(nowSec).first<{ id: string; rules_version: number; opens_at: number }>().catch(() => null);
+  if (!live) {
+    if (!queued) {
+      await provisionRollingRound(db, env, nowSec, nowSec);
+    } else if (queued.rules_version === 2) {
+      // v2 timing is not committed, so a queued round may open early.
+      await db.prepare("UPDATE casino_games SET opens_at = ?, closes_at = ? WHERE id = ?").bind(nowSec, nowSec + DICE_ROLLING_SECONDS, queued.id).run();
+      try { await auditInsert(db, "system", "round_opened_early", queued.id, { reason: "constant_table" }, nowSec).run(); } catch { /* best effort */ }
+    } else {
+      // Only a v1 round is queued: bridge the gap with a short v2 round that
+      // hands off exactly when the v1 round opens on its committed schedule.
+      await provisionRollingRound(db, env, nowSec, nowSec, queued.opens_at);
+    }
+    return;
+  }
+  if (!queued) {
+    await provisionRollingRound(db, env, nowSec, live.closes_at);
   }
 }
 
 async function closeDueRounds(db: D1Database, nowSec: number): Promise<string[]> {
-  const rows = await db.prepare("SELECT id FROM casino_games WHERE state = 'open' AND closes_at <= ?").bind(nowSec).all<{ id: string }>();
+  const due = "state = 'open' AND (closes_at <= ? OR accelerated_close_at <= ?)";
+  const rows = await db.prepare(`SELECT id FROM casino_games WHERE ${due}`).bind(nowSec, nowSec).all<{ id: string }>();
   const closed: string[] = [];
   for (const r of rows.results || []) {
     let res: unknown;
     try {
-      res = await db.prepare("UPDATE casino_games SET state = 'closed' WHERE id = ? AND state = 'open' AND closes_at <= ?").bind(r.id, nowSec).run();
+      res = await db.prepare(`UPDATE casino_games SET state = 'closed' WHERE id = ? AND ${due}`).bind(r.id, nowSec, nowSec).run();
     } catch {
       continue;
     }
@@ -503,7 +550,7 @@ async function settleRound(db: D1Database, env: Env, gameId: string, nowSec: num
     .bind(gameId)
     .first<{ id: string; escrow_id: string; entry_fee: number; rules_version: number; opens_at: number; closes_at: number; commitment: string; seed_box: string }>();
   if (!game) return false;
-  if (game.rules_version !== 1) throw new Error("unsupported_rules");
+  if (game.rules_version !== 1 && game.rules_version !== 2) throw new Error("unsupported_rules");
   const entryRows = await db
     .prepare("SELECT id, account_id, choice, nonce FROM casino_entries WHERE game_id = ? ORDER BY account_id ASC")
     .bind(gameId)
@@ -525,9 +572,7 @@ async function settleRound(db: D1Database, env: Env, gameId: string, nowSec: num
     throw new Error("seed_unavailable");
   }
   const seedHex = bytesToHex(seed);
-  const recomputed = await sha256hex(
-    JSON.stringify(["musebook-casino-v1", gameId, "dice", game.rules_version, game.opens_at, game.closes_at, game.entry_fee, DICE_MAX_ENTRIES, seedHex]),
-  );
+  const recomputed = await diceCommitment(gameId, game.rules_version, game.opens_at, game.closes_at, game.entry_fee, seedHex);
   if (recomputed !== game.commitment) throw new Error("commitment_mismatch");
   const manifest = entries.map((e) => [e.account_id, e.choice, e.nonce]);
   const manifestHash = await sha256hex(JSON.stringify(manifest));
@@ -599,8 +644,8 @@ async function settleRound(db: D1Database, env: Env, gameId: string, nowSec: num
 
 // Shared advance logic for the scheduled handler and POST /api/casino/advance.
 async function casinoAdvance(db: D1Database, env: Env, nowSec: number): Promise<{ closed: string[]; settled: string[]; more_due: boolean }> {
-  await provisionDiceRounds(db, env, nowSec);
   const closed = await closeDueRounds(db, nowSec);
+  await ensureConstantTable(db, env, nowSec);
   const due = await db.prepare("SELECT id FROM casino_games WHERE state = 'closed' LIMIT 4").bind().all<{ id: string }>();
   const settled: string[] = [];
   let n = 0;
@@ -624,10 +669,13 @@ async function casinoAdvance(db: D1Database, env: Env, nowSec: number): Promise<
   return { closed, settled, more_due: (remaining?.c ?? 0) > 0 || (openDue?.c ?? 0) > 0 };
 }
 
-function gameShape(g: { id: string; kind: string; rules_version: number; opens_at: number; closes_at: number; entry_fee: number; max_entries: number; commitment: string; state: string; entry_count: number; pot: number }) {
+function gameShape(g: { id: string; kind: string; rules_version: number; opens_at: number; closes_at: number; accelerated_close_at: number | null; entry_fee: number; max_entries: number; commitment: string; state: string; entry_count: number; pot: number }) {
+  const effectiveClose = Math.min(g.closes_at, g.accelerated_close_at ?? Number.MAX_SAFE_INTEGER);
   return {
     id: g.id, kind: g.kind, rules_version: g.rules_version,
     opens_at: g.opens_at, closes_at: g.closes_at,
+    accelerated_close_at: g.accelerated_close_at,
+    effective_close_at: effectiveClose,
     entry_fee: g.entry_fee, max_entries: g.max_entries,
     commitment: g.commitment, state: g.state,
     entry_count: g.entry_count, pot: g.pot,
@@ -2723,7 +2771,7 @@ export default {
       const state = url.searchParams.get("state");
       if (state && state !== "open" && state !== "closed" && state !== "settled") return json({ error: "invalid_request" }, 400, origin);
       const after = url.searchParams.get("after") || "";
-      let q = "SELECT g.id AS id, g.kind AS kind, g.rules_version AS rules_version, g.opens_at AS opens_at, g.closes_at AS closes_at, " +
+      let q = "SELECT g.id AS id, g.kind AS kind, g.rules_version AS rules_version, g.opens_at AS opens_at, g.closes_at AS closes_at, g.accelerated_close_at AS accelerated_close_at, " +
         "g.entry_fee AS entry_fee, g.max_entries AS max_entries, g.commitment AS commitment, g.state AS state, " +
         "(SELECT COUNT(*) FROM casino_entries e WHERE e.game_id = g.id) AS entry_count, " +
         "(SELECT COALESCE(SUM(amount),0) FROM casino_ledger l WHERE l.game_id = g.id AND l.kind = 'bet') AS pot " +
@@ -2731,6 +2779,7 @@ export default {
       const params: (string | number)[] = [];
       const conds: string[] = [];
       if (state) { conds.push("g.state = ?"); params.push(state); }
+      else { conds.push("g.state != 'superseded'"); }
       if (after) { conds.push("g.id < ?"); params.push(after); }
       if (conds.length) q += " WHERE " + conds.join(" AND ");
       q += " ORDER BY g.id DESC LIMIT ?";
@@ -2747,7 +2796,7 @@ export default {
       const gameId = decodeURIComponent(gameSubMatch[1]);
       const sub = gameSubMatch[3] || "";
       const grow = await env.MUSEBOOK_DB.prepare(
-        "SELECT g.id AS id, g.kind AS kind, g.rules_version AS rules_version, g.opens_at AS opens_at, g.closes_at AS closes_at, " +
+        "SELECT g.id AS id, g.kind AS kind, g.rules_version AS rules_version, g.opens_at AS opens_at, g.closes_at AS closes_at, g.accelerated_close_at AS accelerated_close_at, " +
         "g.entry_fee AS entry_fee, g.max_entries AS max_entries, g.commitment AS commitment, g.state AS state, " +
         "(SELECT COUNT(*) FROM casino_entries e WHERE e.game_id = g.id) AS entry_count, " +
         "(SELECT COALESCE(SUM(amount),0) FROM casino_ledger l WHERE l.game_id = g.id AND l.kind = 'bet') AS pot " +
@@ -2822,10 +2871,11 @@ export default {
       const nowSec = unixNow();
       const payloadHash = await sha256hex("POST /api/casino/games/:id/entries" + JSON.stringify({ game_id: gameId, nonce: (nonce as string).toLowerCase(), choice: 0 }));
       const rejectReason = async (): Promise<string | null> => {
-        const game = await db.prepare("SELECT id, state, opens_at, closes_at, max_entries, entry_fee FROM casino_games WHERE id = ?").bind(gameId)
-          .first<{ id: string; state: string; opens_at: number; closes_at: number; max_entries: number; entry_fee: number }>().catch(() => null);
+        const game = await db.prepare("SELECT id, state, opens_at, closes_at, accelerated_close_at, max_entries, entry_fee FROM casino_games WHERE id = ?").bind(gameId)
+          .first<{ id: string; state: string; opens_at: number; closes_at: number; accelerated_close_at: number | null; max_entries: number; entry_fee: number }>().catch(() => null);
         if (!game) return "not_found";
-        if (game.state !== "open" || nowSec < game.opens_at || nowSec >= game.closes_at) return "entry_closed";
+        const effClose = Math.min(game.closes_at, game.accelerated_close_at ?? Number.MAX_SAFE_INTEGER);
+        if (game.state !== "open" || nowSec < game.opens_at || nowSec >= effClose) return "entry_closed";
         const cnt = await db.prepare("SELECT COUNT(*) AS c FROM casino_entries WHERE game_id = ?").bind(gameId).first<{ c: number }>().catch(() => null);
         if ((cnt?.c ?? 0) >= game.max_entries) return "round_full";
         const mine = await db.prepare("SELECT id FROM casino_entries WHERE game_id = ? AND account_id = ?").bind(gameId, sess.account_id).first().catch(() => null);
@@ -2872,16 +2922,19 @@ export default {
         return json({ error: "temporarily_unavailable" }, 429, origin);
       }
       // Second seat fills the table: accelerate the close to a rapid round.
-      // Idempotent (min) and safe to repeat under concurrent entries.
+      // Recorded in accelerated_close_at so the committed closes_at (v1) and
+      // the commitment proof stay untouched. Idempotent and safe to repeat.
       try {
         const cnt = await db.prepare("SELECT COUNT(*) AS c FROM casino_entries WHERE game_id = ?").bind(gameId).first<{ c: number }>();
         if ((cnt?.c ?? 0) === 2) {
-          const grow = await db.prepare("SELECT closes_at FROM casino_games WHERE id = ?").bind(gameId).first<{ closes_at: number }>();
+          const grow = await db.prepare("SELECT closes_at, accelerated_close_at FROM casino_games WHERE id = ?").bind(gameId).first<{ closes_at: number; accelerated_close_at: number | null }>();
           const rapidClose = Math.min(grow?.closes_at ?? nowSec + DICE_RAPID_SECONDS, nowSec + DICE_RAPID_SECONDS);
-          await db.batch([
-            db.prepare("UPDATE casino_games SET closes_at = ? WHERE id = ?").bind(rapidClose, gameId),
-            auditInsert(db, sess.account_id, "round_accelerated", gameId, { closes_at: rapidClose, reason: "second_seat" }, nowSec),
-          ]);
+          if (grow && (grow.accelerated_close_at === null || grow.accelerated_close_at > rapidClose)) {
+            await db.batch([
+              db.prepare("UPDATE casino_games SET accelerated_close_at = ? WHERE id = ?").bind(rapidClose, gameId),
+              auditInsert(db, sess.account_id, "round_accelerated", gameId, { accelerated_close_at: rapidClose, reason: "second_seat" }, nowSec),
+            ]);
+          }
         }
       } catch {
         // Acceleration is best-effort; the entry itself already committed.
