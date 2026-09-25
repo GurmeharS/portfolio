@@ -6,6 +6,24 @@ const canvas = $('world');
 const params = new URLSearchParams(location.search);
 export const AGENT_MODE = params.has('drive') || params.get('agent') === '1';
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const BUILD_ID = '2026-09-25-touch44';
+const DEBUG = params.get('debug') === '1';
+let lastPointer = 'none', lastSnapshotAt = 0, fpsEMA = 60;
+let debugStrip = null;
+if (DEBUG) {
+  debugStrip = document.createElement('div');
+  Object.assign(debugStrip.style, { position: 'fixed', top: '70px', left: '10px', zIndex: 50, background: 'rgba(10,20,18,.85)', color: '#cfe3d2', font: '10px/1.7 monospace', padding: '8px 10px', borderRadius: '6px', pointerEvents: 'none', whiteSpace: 'pre', maxWidth: 'calc(100vw - 20px)' });
+  document.body.appendChild(debugStrip);
+}
+function updateDebug() {
+  if (!debugStrip) return;
+  const snapAge = lastSnapshotAt ? ((performance.now() - lastSnapshotAt) / 1000).toFixed(1) + 's' : 'never';
+  debugStrip.textContent =
+    `build ${BUILD_ID} · ${Math.round(fpsEMA)}fps\n` +
+    `socket ${serverLive ? 'LIVE' : 'local'} · snap ${snapAge} · turn ${economy.turn}\n` +
+    `pointer: ${lastPointer}\n` +
+    `picked: ${followed ? followed.name : 'none'}`;
+}
 const SAVE_KEY = 'agent-city:3d:v1';
 const rand = items => items[Math.floor(Math.random() * items.length)];
 const clamp = THREE.MathUtils.clamp;
@@ -98,6 +116,7 @@ function connectCity() {
         !palettes.every(p => state.muses.some(m => m.name === p.name && walkable(m.x, m.y)))) return;
     const first = !serverLive;
     serverLive = true; reconnectDelay = 1000; armWatchdog();
+    lastSnapshotAt = performance.now();
     worldTime = (62 + state.clock) % world.dayLengthSeconds;
     for (const incoming of state.muses) {
       const m = muses.find(m => m.name === incoming.name);
@@ -742,6 +761,7 @@ function frame(timestamp) {
   if (!running) return;
   const dt = lastFrame ? Math.min((timestamp - lastFrame) / 1000, .075) : 0;
   lastFrame = timestamp;
+  if (dt > 0) fpsEMA += (1 / dt - fpsEMA) * .05;
   if (!document.hidden) {
     elapsed += dt; if (!serverLive) worldTime = (worldTime + dt) % world.dayLengthSeconds;
     clockUniform.value = reducedMotion ? 0 : elapsed;
@@ -750,7 +770,7 @@ function frame(timestamp) {
     selection.visible = !!followed;
     if (followed) selection.position.set(followed.x + .5, .16, followed.y + .5);
     hudTimer += dt; saveTimer += dt;
-    if (hudTimer > .25) { updateHUD(); hudTimer = 0; }
+    if (hudTimer > .25) { updateHUD(); if (DEBUG) updateDebug(); hudTimer = 0; }
     if (saveTimer > 5) { save(); saveTimer = 0; }
     renderer.render(scene, camera);
   }
@@ -821,15 +841,17 @@ async function init() {
 // guard keeps accidental selections from firing while scrolling the page.
 const pointer = new THREE.Vector2(), raycaster = new THREE.Raycaster(), projected = new THREE.Vector3();
 let tapStart = null;
-canvas.addEventListener('pointerdown', event => { tapStart = { x: event.clientX, y: event.clientY }; });
+canvas.addEventListener('pointerdown', event => { tapStart = { x: event.clientX, y: event.clientY }; if (DEBUG) lastPointer = `down ${event.pointerType} ${event.clientX | 0},${event.clientY | 0}`; });
+canvas.addEventListener('pointercancel', () => { tapStart = null; if (DEBUG) lastPointer = 'CANCELLED by browser'; });
 canvas.addEventListener('pointerup', event => {
+  if (DEBUG) lastPointer = `up ${event.pointerType} ${event.clientX | 0},${event.clientY | 0}`;
   if (!world || !camera) return;
   if (tapStart && Math.hypot(event.clientX - tapStart.x, event.clientY - tapStart.y) > 10) { tapStart = null; return; }
   tapStart = null;
   pointer.set(event.clientX / innerWidth * 2 - 1, 1 - event.clientY / innerHeight * 2);
   raycaster.setFromCamera(pointer, camera);
   let picked = null, nearest = Infinity;
-  const touchRadius = event.pointerType === 'touch' ? 30 : 17;
+  const touchRadius = event.pointerType === 'touch' ? 44 : 17;
   for (const m of muses) {
     const hits = raycaster.intersectObject(m.body, true);
     projected.set(m.x + .5, 1.2, m.y + .5).project(camera);
