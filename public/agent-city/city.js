@@ -7,7 +7,7 @@ const canvas = $('world');
 const params = new URLSearchParams(location.search);
 export const AGENT_MODE = params.has('drive') || params.get('agent') === '1';
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const BUILD_ID = '2026-09-25-smooth';
+const BUILD_ID = '2026-09-25-panels';
 const DEBUG = params.get('debug') === '1';
 let lastPointer = 'none', lastSnapshotAt = 0, fpsEMA = 60;
 let frameCount = 0, frameError = null, initDone = false, consecFrameErrors = 0;
@@ -127,10 +127,15 @@ function connectCity() {
       const m = muses.find(m => m.name === incoming.name);
       const dx = incoming.x - m.x, dy = incoming.y - m.y;
       if (dx || dy) m.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
-      m.x = incoming.x; m.y = incoming.y; m.path = incoming.path || [];
+      m.x = incoming.x; m.y = incoming.y;
+      const rawPath = incoming.path || [];
+      if (first) { m.rx = m.x; m.ry = m.y; m.path = rawPath.slice(); }
+      // Drop waypoints the local walker already passed so muses never moonwalk.
+      else m.path = rawPath.filter((wp, i) => i === rawPath.length - 1 || Math.hypot(wp.x - m.rx, wp.y - m.ry) > .35);
       m.destination = world.pointsOfInterest.find(p => p.id === incoming.destination) || null;
       m.controlled = !!incoming.override;
-      m.state = m.path.length ? 'walking' : incoming.action ? 'acting' : 'idle';
+      m.controller = typeof incoming.override === 'string' ? incoming.override : incoming.override?.by || incoming.override?.name || null;
+      m.serverAction = incoming.action ? 'acting' : 'idle';
       m.action = incoming.action?.label || 'taking a breath';
       m.bubble = incoming.bubble?.text || '';
       m.bubbleTimer = Math.max(0, (incoming.bubble?.until || 0) - state.clock);
@@ -199,6 +204,9 @@ function districtAt(muse) {
 function dispatch(message) {
   $('dispatch').textContent = message;
   lastDispatch = elapsed;
+  logItems.unshift({ at: new Date(), text: message });
+  if (logItems.length > 60) logItems.pop();
+  if (logOpen) renderLog();
 }
 
 function chooseDestination(muse) {
@@ -603,7 +611,7 @@ function buildRoster() {
     row.querySelector('.muse-name').textContent = m.name;
     m.row = row; m.nameEl = row.querySelector('.muse-name'); m.districtEl = row.querySelector('.muse-district'); m.actionEl = row.querySelector('.muse-action');
     m.shellsEl = row.querySelector('.muse-shells');
-    row.addEventListener('click', () => follow(m === followed ? null : m)); $('roster').append(row);
+    row.addEventListener('click', () => selectMuse(m)); $('roster').append(row);
   }
 }
 function follow(m) {
@@ -614,6 +622,54 @@ function follow(m) {
   }
   $('hint').textContent = m ? `Following ${m.name} · Esc to release` : 'Drag to look around · tap a muse to follow';
   updateHUD(); save();
+}
+let selected = null, logOpen = false;
+const logItems = [];
+function selectMuse(m) {
+  if (selected === m) { selected = null; follow(null); }
+  else { selected = m; follow(m); }
+  logOpen = false; $('log-panel').classList.remove('open'); $('ticker').classList.remove('open');
+  renderMuseCard();
+}
+function stampRole(m) {
+  for (const [districtId, claimant] of Object.entries(economy.claims || {})) {
+    if (claimant === m.name) {
+      const d = world.districts.find(d => d.id === districtId);
+      return `Stamp-holder · ${d ? d.name : districtId}`;
+    }
+  }
+  return '—';
+}
+function fillMuseCard(m) {
+  const district = districtAt({ x: m.rx, y: m.ry });
+  $('mc-avatar').style.background = m.palette.shirt;
+  $('mc-name').textContent = m.name + (m.flair ? ' ✦ ' + m.flair : '');
+  $('mc-doing').textContent = m.state === 'walking' ? `Walking to ${m.destination?.name || 'somewhere'}` : m.action;
+  $('mc-where').textContent = district.name;
+  $('mc-shells').textContent = `${m.shells ?? 0}◦`;
+  $('mc-lantern').innerHTML = m.lanternColor ? `<span class="swatch" style="background:${m.lanternColor}"></span>owned` : '—';
+  $('mc-runby').textContent = m.controller || (m.controlled ? 'guided right now' : 'on their own');
+  $('mc-role').textContent = stampRole(m);
+  $('mc-follow').textContent = followed === m ? 'Unfollow' : 'Follow';
+}
+function renderMuseCard() {
+  const card = $('muse-card');
+  if (!selected) { card.classList.remove('open'); return; }
+  card.classList.add('open');
+  fillMuseCard(selected);
+}
+function renderLog() {
+  const panel = $('log-items');
+  panel.textContent = '';
+  for (const item of logItems) {
+    const div = document.createElement('div');
+    div.className = 'log-item';
+    const time = document.createElement('span');
+    time.className = 'log-time';
+    time.textContent = item.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    div.append(time, document.createTextNode(item.text));
+    panel.append(div);
+  }
 }
 function resetOverview() {
   follow(null);
@@ -645,7 +701,7 @@ function describeEvent(e) {
 function updateHUD() {
   document.body.classList.toggle('is-night', night > .4);
   for (const m of muses) {
-    const district = districtAt(m);
+    const district = districtAt({ x: m.rx, y: m.ry });
     m.row.classList.toggle('selected', m === followed); m.row.setAttribute('aria-pressed', String(m === followed));
     m.districtEl.textContent = district.name; m.actionEl.textContent = (m.controlled ? '⌁ ' : '') + m.action;
     m.nameEl.textContent = m.name + (m.flair ? ' ✦ ' + m.flair : '');
@@ -665,6 +721,7 @@ function updateHUD() {
     for (const e of economy.recent) { const text = describeEvent(e); if (text) items.push(text); }
     if (items.length) dispatch(items[Math.floor(elapsed / 6) % items.length]);
   }
+  if (selected) fillMuseCard(selected);
 }
 function save() {
   if (!world) return;
@@ -781,6 +838,24 @@ function animateMuse(m, t) {
   }
   m.lantern.visible = night > .15;
 }
+// When the shared city is live, each muse walks its server-provided path locally
+// between the 1Hz snapshots, so motion is continuous instead of stepping on tick
+// boundaries. Snapshots only correct drift.
+function stepRemoteMuse(m, dt) {
+  if (Math.hypot(m.x - m.rx, m.y - m.ry) > 3) { m.rx = m.x; m.ry = m.y; }
+  if (m.path.length) {
+    const wp = m.path[0];
+    const dx = wp.x - m.rx, dy = wp.y - m.ry, dist = Math.hypot(dx, dy), step = m.speed * dt;
+    if (dist <= Math.max(step, .05)) { m.rx = wp.x; m.ry = wp.y; m.path.shift(); }
+    else { m.rx += dx / dist * step; m.ry += dy / dist * step; }
+    m.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+    m.state = 'walking';
+  } else {
+    const k = 1 - Math.exp(-dt * 5);
+    m.rx += (m.x - m.rx) * k; m.ry += (m.y - m.ry) * k;
+    m.state = m.serverAction || 'idle';
+  }
+}
 function frame(timestamp) {
   if (!running) return;
   try {
@@ -791,11 +866,8 @@ function frame(timestamp) {
     elapsed += dt; if (!serverLive) worldTime = (worldTime + dt) % world.dayLengthSeconds;
     clockUniform.value = reducedMotion ? 0 : elapsed;
     for (const m of muses) {
-      if (!serverLive) updateMuse(m, dt);
-      // Glide toward the authoritative tile so 1Hz server ticks read as
-      // walking instead of teleporting.
-      const glide = 1 - Math.exp(-dt * 6);
-      m.rx += (m.x - m.rx) * glide; m.ry += (m.y - m.ry) * glide;
+      if (serverLive) stepRemoteMuse(m, dt);
+      else { updateMuse(m, dt); m.rx = m.x; m.ry = m.y; }
       animateMuse(m, elapsed);
     }
     animateScenery(elapsed); updateLighting(); updateCamera(dt);
@@ -909,7 +981,7 @@ canvas.addEventListener('pointerup', event => {
     const distance = Math.hypot((projected.x + 1) * innerWidth / 2 - event.clientX, (1 - projected.y) * innerHeight / 2 - event.clientY);
     if ((hits.length || distance < touchRadius) && distance < nearest) { picked = m; nearest = distance; }
   }
-  follow(picked);
+  selectMuse(picked);
 });
 function changeZoom(factor) {
   if (!followed && controls) {
@@ -924,7 +996,16 @@ $('zoom-in').addEventListener('click', () => changeZoom(1.2));
 $('zoom-out').addEventListener('click', () => changeZoom(1 / 1.2));
 $('overview').addEventListener('click', resetOverview);
 canvas.addEventListener('wheel', event => { if (!followed) return; event.preventDefault(); changeZoom(event.deltaY < 0 ? 1.07 : 1 / 1.07); }, { passive: false });
-window.addEventListener('keydown', event => { if (event.key === 'Escape') follow(null); });
+$('mc-close').addEventListener('click', () => { selected = null; renderMuseCard(); });
+$('mc-follow').addEventListener('click', () => { if (selected) { follow(followed === selected ? null : selected); fillMuseCard(selected); } });
+$('ticker').addEventListener('click', () => {
+  logOpen = !logOpen;
+  $('log-panel').classList.toggle('open', logOpen);
+  $('ticker').classList.toggle('open', logOpen);
+  if (logOpen) { selected = null; renderMuseCard(); renderLog(); }
+});
+$('ticker').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('ticker').click(); } });
+window.addEventListener('keydown', event => { if (event.key === 'Escape') { selected = null; follow(null); renderMuseCard(); } });
 window.addEventListener('resize', resize);
 window.addEventListener('pagehide', save);
 document.addEventListener('visibilitychange', () => { lastFrame = 0; if (document.hidden) save(); });

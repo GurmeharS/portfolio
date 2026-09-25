@@ -10,3 +10,27 @@
 #drive-controls { padding: 10px 14px; font-size: 9px; }
 #drive-controls label, #drive-controls small { display: block; line-height: 1.6; }
 #city-key { box-sizing: border-box; width: 100%; margin: 6px 0; padding: 8px; color: inherit; background: #f3edda; border: 1px solid #9b9f83; border-radius: 3px; }
+
+/* Activity log + muse detail card */
+#ticker{pointer-events:auto;cursor:pointer}
+#ticker .ticker-toggle{position:absolute;top:10px;right:12px;font-size:10px;color:#c6b784;transition:transform .2s}
+#ticker.open .ticker-toggle{transform:rotate(180deg)}
+#log-panel{position:absolute;left:34px;bottom:172px;width:430px;max-width:calc(100vw - 68px);max-height:36vh;overflow-y:auto;background:var(--glass);border:1px solid var(--line);border-radius:2px;padding:4px 0;display:none;z-index:5}
+#log-panel.open{display:block}
+.log-item{padding:7px 16px;font-size:11px;line-height:1.5;color:#d0daca;border-bottom:1px solid #ffffff08}
+.log-time{color:#c6b784;font-size:9px;margin-right:8px;white-space:nowrap}
+#muse-card{position:absolute;left:34px;bottom:172px;width:302px;background:var(--glass);border:1px solid var(--line);border-left:2px solid #c6b784;border-radius:2px;padding:14px 16px 16px;z-index:6;transform:translateY(8px);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
+#muse-card.open{transform:none;opacity:1;pointer-events:auto}
+#mc-close{position:absolute;top:4px;right:8px;background:none;border:none;color:#7d948f;font-size:18px;cursor:pointer;line-height:1;padding:4px}
+.mc-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+#mc-avatar{width:34px;height:34px;border-radius:50%;border:2px solid #ffffff22;flex:none}
+#mc-name{font-size:12px;color:#fff}
+.mc-sub{font-size:7px;letter-spacing:2px;color:#7d948f;margin-top:5px}
+#muse-card dl{margin:0 0 12px;display:grid;gap:7px}
+#muse-card dl>div{display:flex;justify-content:space-between;gap:10px;font-size:10px}
+#muse-card dt{color:#7d948f;flex:none}
+#muse-card dd{margin:0;color:#d0daca;text-align:right}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+#mc-follow{width:100%;padding:10px;background:#c6b784;border:none;border-radius:2px;font-family:inherit;font-size:9px;letter-spacing:1px;cursor:pointer;color:#1a2b2a}
+#mc-follow:hover{filter:brightness(1.08)}
+@media(max-width:760px){#log-panel,#muse-card{left:13px;right:13px;width:auto;bottom:292px;max-width:none}}

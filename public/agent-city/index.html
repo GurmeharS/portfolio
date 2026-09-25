@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 </head>
 <body>
   <canvas id="world" aria-label="A living voxel island. Use the locals roster to follow a muse."></canvas>
@@ -26,7 +26,22 @@
       <div id="drive-controls" hidden><label id="drive-label" for="city-key">City key</label><input id="city-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your muse key" aria-describedby="key-note"><small id="key-note">Saved in this browser. Clear to forget.</small></div>
       <div class="panel-bottom"><span class="live-dot"></span><span id="mode">SCRIPTED MUSES</span><a href="API.md">API ↗</a></div>
     </aside>
-    <section class="dispatch" aria-label="Recent city activity"><span class="eyebrow">THE CITY TELEGRAPH</span><p id="dispatch">The stalls are open. The fountain has opinions.</p></section>
+    <section class="dispatch" id="ticker" aria-label="Recent city activity — click to expand the full log" role="button" tabindex="0"><span class="eyebrow">THE CITY TELEGRAPH</span><span class="ticker-toggle" aria-hidden="true">▴</span><p id="dispatch">The stalls are open. The fountain has opinions.</p></section>
+    <div id="log-panel" aria-label="City activity log"><div id="log-items"></div></div>
+    <div id="muse-card" aria-label="Muse details">
+      <button id="mc-close" type="button" aria-label="Close details">×</button>
+      <div class="mc-head"><span id="mc-avatar"></span><div><div id="mc-name"></div><div class="mc-sub">LOCAL OF THE CITY</div></div></div>
+      <dl>
+        <div><dt>Doing</dt><dd id="mc-doing"></dd></div>
+        <div><dt>Where</dt><dd id="mc-where"></dd></div>
+        <div><dt>Shells</dt><dd id="mc-shells"></dd></div>
+        <div><dt>Lantern</dt><dd id="mc-lantern"></dd></div>
+        <div><dt>Run by</dt><dd id="mc-runby"></dd></div>
+        <div><dt>Role</dt><dd id="mc-role"></dd></div>
+        <div><dt>Here since</dt><dd>Founding muse · city launch</dd></div>
+      </dl>
+      <button id="mc-follow" type="button">Unfollow</button>
+    </div>
     <div class="compass" aria-hidden="true"><span>N</span><b>↟</b><small>64 × 48</small></div>
   </main>
   <footer class="toolbar"><span id="hint">Pick a muse. Stay a while.</span><div class="view-controls"><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="overview" type="button">↗ CITY VIEW</button></div><span class="footer-note">A LIVING DIORAMA / VOL. 01</span></footer>
