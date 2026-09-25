@@ -10,3 +10,11 @@ database_id = "5ab6a403-309a-47c4-85c8-231449f04024"
 
 [triggers]
 crons = ["* * * * *"]
+
+[[durable_objects.bindings]]
+name = "CITY_ROOM"
+class_name = "CityRoom"
+
+[[migrations]]
+tag = "city-v1"
+new_classes = ["CityRoom"]

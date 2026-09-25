@@ -43,6 +43,81 @@ const thoughts = {
   default: ['Taking the scenic route.', 'A small day, well spent.', 'I have a good feeling.', 'No rush. We live here.']
 };
 
+const CITY_API = 'https://musebook-api.gurmehar.workers.dev';
+let serverLive = false, reconnectDelay = 1000, citySocket, reconnectTimer, streamWatchdog;
+const driveName = params.get('drive');
+const keyStorage = `agent-city:key:${driveName || ''}`;
+let driveKey = '';
+try { driveKey = localStorage.getItem(keyStorage) || ''; } catch { /* Storage may be disabled. */ }
+window.cityAction = async (action, actionParams = {}) => {
+  if (!driveName || !palettes.some(p => p.name === driveName)) throw new Error('Open ?drive=Ace (or another roster name) first.');
+  if (!driveKey) throw new Error('Enter a city key in the HUD.');
+  const response = await fetch(`${CITY_API}/api/city/action`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: driveKey, action, params: actionParams })
+  });
+  const result = await response.json();
+  if (!result.ok) throw new Error(result.reason || `City action failed (${response.status}).`);
+  return result;
+};
+function localFallback() {
+  if (!serverLive) return;
+  serverLive = false;
+  for (const m of muses) {
+    m.path = []; m.destination = null; m.controlled = false; m.state = 'idle';
+    m.action = 'taking a breath'; m.timer = .5; m.bubbleTimer = 0; m.emoteTimer = 0;
+  }
+  dispatch('The shared city is resting. Local life continues.');
+}
+function connectCity() {
+  clearTimeout(reconnectTimer);
+  let ended = false;
+  const retry = () => {
+    if (ended) return;
+    ended = true;
+    clearTimeout(streamWatchdog); localFallback();
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectCity(); }, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+  };
+  try { citySocket = new WebSocket('wss://musebook-api.gurmehar.workers.dev/api/city/stream'); }
+  catch { retry(); return; }
+  const socket = citySocket;
+  const armWatchdog = () => {
+    clearTimeout(streamWatchdog);
+    streamWatchdog = setTimeout(() => { socket.close(); retry(); }, 15000);
+  };
+  armWatchdog();
+  socket.addEventListener('message', event => {
+    if (ended || socket !== citySocket) return;
+    let state;
+    try { state = JSON.parse(event.data); } catch { return; }
+    if (!Number.isFinite(state.clock) || !Array.isArray(state.muses) || state.muses.length !== 6 ||
+        !palettes.every(p => state.muses.some(m => m.name === p.name && walkable(m.x, m.y)))) return;
+    const first = !serverLive;
+    serverLive = true; reconnectDelay = 1000; armWatchdog();
+    worldTime = (62 + state.clock) % world.dayLengthSeconds;
+    for (const incoming of state.muses) {
+      const m = muses.find(m => m.name === incoming.name);
+      const dx = incoming.x - m.x, dy = incoming.y - m.y;
+      if (dx || dy) m.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+      m.x = incoming.x; m.y = incoming.y; m.path = incoming.path || [];
+      m.destination = world.pointsOfInterest.find(p => p.id === incoming.destination) || null;
+      m.controlled = !!incoming.override;
+      m.state = m.path.length ? 'walking' : incoming.action ? 'acting' : 'idle';
+      m.action = incoming.action?.label || 'taking a breath';
+      m.bubble = incoming.bubble?.text || '';
+      m.bubbleTimer = Math.max(0, (incoming.bubble?.until || 0) - state.clock);
+      m.emote = incoming.action?.kind === 'emote' ? incoming.action.label : null;
+      m.emoteTimer = m.emote ? Math.max(0, incoming.action.until - state.clock) : 0;
+    }
+    if (first) dispatch('Connected to the shared city. Six lives, unfolding together.');
+    updateHUD();
+  });
+  socket.addEventListener('close', retry);
+  socket.addEventListener('error', () => { socket.close(); retry(); });
+}
+
 function walkable(x, y) {
   return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 &&
     x < world.width && y < world.height && world.walkable.includes(world.tiles[y][x]);
@@ -150,6 +225,7 @@ export class AgentAPI {
     }));
   }
   async action(payload) {
+    if (serverLive) return window.cityAction(payload?.action, { x: payload?.x, y: payload?.y, text: payload?.text, emote: payload?.emote, poi: payload?.poi });
     if (!AGENT_MODE) throw new Error('Agent mode is off. Open ?drive=Ace or ?agent=1.');
     if (!payload || typeof payload !== 'object') throw new Error('An action object is required.');
     const muse = muses.find(m => m.name === payload.muse);
@@ -182,6 +258,7 @@ export class AgentAPI {
     return { ok: true, muse: muse.name, action: payload.action };
   }
   async release(name) {
+    if (serverLive) return { ok: true, muse: name }; // Shared actions expire automatically.
     const muse = muses.find(m => m.name === name);
     if (!muse) throw new Error('Unknown muse.');
     muse.x = Math.round(muse.x); muse.y = Math.round(muse.y);
@@ -512,7 +589,7 @@ function updateHUD() {
   const hours = worldTime / world.dayLengthSeconds * 24;
   $('clock').textContent = `${String(Math.floor(hours)).padStart(2, '0')}:${String(Math.floor(hours % 1 * 60)).padStart(2, '0')}`;
   $('phase').textContent = hours < 5 || hours >= 21 ? 'NIGHT' : hours < 9 ? 'MORNING' : hours < 17 ? 'DAYLIGHT' : 'EVENING';
-  $('mode').textContent = AGENT_MODE ? 'AGENT MODE / LOCAL' : 'SCRIPTED MUSES';
+  $('mode').textContent = serverLive ? 'SHARED CITY / LIVE' : AGENT_MODE ? 'AGENT MODE / LOCAL' : 'SCRIPTED MUSES / LOCAL';
 }
 function save() {
   if (!world) return;
@@ -627,9 +704,9 @@ function frame(timestamp) {
   const dt = lastFrame ? Math.min((timestamp - lastFrame) / 1000, .075) : 0;
   lastFrame = timestamp;
   if (!document.hidden) {
-    elapsed += dt; worldTime = (worldTime + dt) % world.dayLengthSeconds;
+    elapsed += dt; if (!serverLive) worldTime = (worldTime + dt) % world.dayLengthSeconds;
     clockUniform.value = reducedMotion ? 0 : elapsed;
-    for (const m of muses) { updateMuse(m, dt); animateMuse(m, elapsed); }
+    for (const m of muses) { if (!serverLive) updateMuse(m, dt); animateMuse(m, elapsed); }
     animateScenery(elapsed); updateLighting(); updateCamera(dt);
     selection.visible = !!followed;
     if (followed) selection.position.set(followed.x + .5, .16, followed.y + .5);
@@ -678,12 +755,22 @@ async function init() {
     selection.rotation.x = -Math.PI / 2; selection.rotation.z = Math.PI / 4; scene.add(selection);
     window.AgentAPI = AgentAPI; window.agentAPI = new AgentAPI(); window.AGENT_MODE = AGENT_MODE;
     const driven = muses.find(m => m.name === params.get('drive'));
-    if (driven) { takeControl(driven); followed = driven; zoom = 1; dispatch(`${driven.name} is ready. The local console API is connected.`); }
+    if (driven) {
+      followed = driven; zoom = 1;
+      $('drive-controls').hidden = false;
+      $('drive-label').textContent = `${driven.name} · city key`;
+      $('city-key').value = driveKey;
+      $('city-key').addEventListener('input', event => {
+        driveKey = event.target.value.trim();
+        try { if (driveKey) localStorage.setItem(keyStorage, driveKey); else localStorage.removeItem(keyStorage); } catch {}
+      });
+      dispatch(`${driven.name} is ready. Enter a key to drop in.`);
+    }
     else if (params.has('drive')) dispatch('Unknown muse in ?drive. Use an exact roster name; agent mode is available.');
     $('hint').textContent = followed ? `Following ${followed.name} · Esc to release` : 'Pick a muse. Stay a while.';
     resize(); updateCamera(0, true); updateHUD(); updateLighting();
     for (const m of muses) animateMuse(m, 0);
-    $('loading').classList.add('hidden'); requestAnimationFrame(frame);
+    $('loading').classList.add('hidden'); requestAnimationFrame(frame); connectCity();
   } catch (error) {
     renderer?.dispose(); $('loading').textContent = `The city could not open. ${error.message} Serve this folder over HTTP and reload.`;
     console.error('Agent City:', error);

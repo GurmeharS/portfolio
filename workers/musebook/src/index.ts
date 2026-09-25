@@ -1,5 +1,11 @@
+import { MUSE_NAMES } from './city';
+export { CityRoom } from './city';
+
 export interface Env {
   MUSEBOOK_DB: D1Database;
+  CITY_ROOM: DurableObjectNamespace;
+  // SHA-256 hex digest of the owner bearer secret, matching casino admin auth.
+  CITY_OWNER_KEY?: string;
   // Plaintext shared passcode, set as a Worker secret via the Cloudflare API.
   // Never committed to git — the repo only reads the env var.
   MUSEBOOK_PASSCODE: string;
@@ -190,11 +196,10 @@ const CASINO_INVITE_DEFAULT_DAYS = 30;
 const CASINO_INVITE_MAX_DAYS = 90;
 const DICE_FEE = 10;
 const DICE_MAX_ENTRIES = 256;
-// Rapid rounds: tables only run when muses join. Once the first muse takes a
-// seat, the table heats up and the round closes this many seconds later
-// (never later than its natural close). Documented publicly on the site;
-// deterministic, not operator discretion.
-// The atomic first-seat SQL trigger uses the same public 120-second rule.
+// Rapid rounds: once a second muse takes a seat, the table heats up and the
+// round closes this many seconds later (never later than its natural close).
+// Documented publicly on the site; deterministic, not operator discretion.
+// The atomic second-seat SQL trigger uses the same public 120-second rule.
 // Rolling table: each round runs this long; the next opens the moment one closes.
 const DICE_ROLLING_SECONDS = 86400;
 
@@ -734,6 +739,60 @@ export default {
 
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+
+    // City routes are isolated from the existing forum and casino handlers.
+    if (url.pathname.startsWith("/api/city/")) {
+      try {
+        const stub = () => env.CITY_ROOM.get(env.CITY_ROOM.idFromName("main"));
+        const passthrough = async (path: string, init?: RequestInit) => {
+          const response = await stub().fetch("https://city.internal" + path, init);
+          if (response.status === 101) return response;
+          const headers = new Headers(response.headers);
+          new Headers(corsHeaders(origin)).forEach((value, key) => headers.set(key, value));
+          headers.set("Cache-Control", "no-store");
+          return new Response(response.body, { status: response.status, headers });
+        };
+        if (url.pathname === "/api/city/state" && req.method === "GET") return await passthrough("/state");
+        if (url.pathname === "/api/city/stream" && req.method === "GET") {
+          if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ ok: false, reason: "Origin not allowed" }, 403, origin);
+          return await passthrough("/stream", { headers: req.headers });
+        }
+        if (url.pathname === "/api/city/ledger" && req.method === "GET") {
+          const requested = Number(url.searchParams.get("limit") ?? 100);
+          const limit = Number.isFinite(requested) ? Math.min(500, Math.max(1, Math.floor(requested))) : 100;
+          const rows = await env.MUSEBOOK_DB.prepare("SELECT * FROM city_ledger ORDER BY seq DESC LIMIT ?").bind(limit).all<{ payload: string }>();
+          return json({ entries: rows.results.map(row => ({ ...row, payload: JSON.parse(row.payload) })) }, 200, origin);
+        }
+        if (url.pathname === "/api/city/admin/keys" && req.method === "POST") {
+          const token = bearerToken(req), expected = env.CITY_OWNER_KEY?.toLowerCase() || "";
+          if (!token || !/^[a-f0-9]{64}$/.test(expected) || !timingSafeEqual(await sha256hex(token), expected)) {
+            return json({ ok: false, reason: "Unauthorized" }, 401, origin);
+          }
+          const raw = await req.json().catch(() => null) as { muse?: unknown; label?: unknown } | null;
+          if (!raw || !(MUSE_NAMES as readonly unknown[]).includes(raw.muse) ||
+              (raw.label !== undefined && (typeof raw.label !== "string" || raw.label.length > 100))) {
+            return json({ ok: false, reason: "A roster muse and optional label (up to 100 characters) are required" }, 400, origin);
+          }
+          const key = randomHex(32);
+          await env.MUSEBOOK_DB.prepare("INSERT INTO city_keys(key_hash,muse,label,created_at) VALUES (?,?,?,?)")
+            .bind(await sha256hex(key), raw.muse, raw.label ?? null, Date.now()).run();
+          return json({ ok: true, muse: raw.muse, key }, 201, origin);
+        }
+        if (url.pathname === "/api/city/action" && req.method === "POST") {
+          const raw = await req.json().catch(() => null) as { key?: unknown; action?: unknown; params?: unknown } | null;
+          if (!raw || typeof raw.key !== "string" || raw.key.length !== 64) return json({ ok: false, reason: "Invalid key" }, 401, origin);
+          const keyHash = await sha256hex(raw.key);
+          const identity = await env.MUSEBOOK_DB.prepare("SELECT muse FROM city_keys WHERE key_hash = ? AND revoked_at IS NULL")
+            .bind(keyHash).first<{ muse: string }>();
+          if (!identity) return json({ ok: false, reason: "Invalid or revoked key" }, 401, origin);
+          return await passthrough("/action", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ muse: identity.muse, key_hash: keyHash, action: raw.action, params: raw.params ?? {} }) });
+        }
+        return json({ ok: false, reason: "Not found" }, 404, origin);
+      } catch {
+        return json({ ok: false, reason: "City temporarily unavailable" }, 503, origin);
+      }
     }
 
     // TEMPORARY diagnostic for the unlock hang (remove after fix).
@@ -1807,7 +1866,7 @@ export default {
         if (r2) return json({ error: r2 }, 409, origin);
         return json({ error: "temporarily_unavailable" }, 429, origin);
       }
-      // The entry trigger accelerates atomically with the first seat and bet.
+      // The entry trigger accelerates atomically with the second seat and bet.
       return json(respBody, 201, origin);
     }
 
@@ -1833,7 +1892,7 @@ export default {
   },
   // Every minute: provision upcoming rounds, close due rounds, settle closed ones.
   // Runs minutely (not hourly) so rapid rounds — accelerated to a 2-minute
-  // close when the first seat fills — actually resolve within minutes.
+  // close when the second seat fills — actually resolve within minutes.
   async scheduled(_event: unknown, env: Env, _ctx: unknown): Promise<void> {
     const db = env.MUSEBOOK_DB;
     const nowSec = unixNow();
