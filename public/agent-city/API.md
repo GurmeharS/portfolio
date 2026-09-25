@@ -1,13 +1,17 @@
 # Agent City — action API
 
-## Choices made for this scaffold
+## Choices made for the 3D rebuild
 
-- This is a static, local spectator demo, not a shared multiplayer service. The fixed 64 × 48 world lives in `world.json`; six muses use collision-aware shortest paths on a four-neighbor grid. Muses can pass through each other.
-- One day lasts 180 seconds of active simulation. Hidden tabs pause or throttle; elapsed time is capped on return. There is no offline simulation.
-- Positions and time of day are saved every five seconds and on page exit to this browser's `localStorage`. Reloading resumes those positions with new scripted tasks. Agent control, speech, and routes are session-only. Storage failures gracefully start a fresh session. Clear `agent-city:v1` from local storage to reset.
-- The Harbor was founded by Big Benjamin and is the economic hub. Trading, building, and casino visits are visual storytelling only; no money, inventory, or gambling is implemented.
-- All artwork is drawn in code. The only external request other than local files is the optional Google Font; monospace is the offline fallback. Reduced-motion preferences disable walking bob and decorative water animation and make camera changes instant.
-- Serve this directory with any static HTTP host; no build or packages are needed. `file://` is not supported because browsers restrict fetching `world.json` from local files.
+- The demo is now a procedural Three.js voxel diorama, using **Three.js 0.160.0** through a pinned jsDelivr import map. There is no build step or npm dependency. Static HTTP hosting and a connection to the CDN are required. The optional Google Font falls back to monospace. A load-error message covers CDN failure; a separate message explains unavailable WebGL.
+- A perspective camera looks down at about 49°. The overview fits the island into the space between the HUD panels; following a muse smoothly moves closer. Zoom buttons and the mouse wheel adjust the view. Touch taps and keyboard-accessible roster buttons select muses.
+- The original **64 × 48 grid and four district names are preserved**. A small garden pond adds one object and twelve blocked tiles. Existing POIs remain in place. API `(x, y)` maps to Three.js `(x, elevation, z)`; ground elevation is zero, and one tile is one scene unit.
+- Static tiles, buildings, furniture, tree trunks, and lamp posts share an `InstancedMesh` with per-instance colors. Tree crowns, water, lamp bulbs, smoke, fountain drops, and water highlights use their own batches. The pixel ratio is capped at 2; a single 2048² sun shadow map supplies soft shadows. Night lamps use emissive bulbs and translucent light pools rather than individual shadow-casting lights.
+- This remains a local spectator simulation, not a shared multiplayer service. Six muses use collision-aware shortest paths on the four-neighbor grid and can pass through each other. Boats and decorative water do not participate in navigation. All models, textures, labels, water shimmer, and motion are generated in code.
+- One day lasts **180 seconds of active simulation**, with sun/moon lighting, sky/fog transitions, and warm lanterns at night. Hidden tabs pause the simulation; frame time is capped on return. There is no offline progression.
+- Positions, time of day, selected muse, and zoom are saved every five seconds, on view changes, and on page exit to `localStorage` under **`agent-city:3d:v1`**. Reloading restores that view with new scripted tasks. Routes, speech, and agent control remain session-only. Old 2D saves are left untouched; storage failures start a fresh session.
+- Reduced-motion preferences disable walk bob, swaying trees, drifting smoke, moving water highlights, boat rocking, and fountain particles, and make camera transitions instant. Muses still travel and the day/night cycle still advances.
+- The Harbor was founded by Big Benjamin and is the economic hub. Trading, building, and the casino are visual storytelling; no money, inventory, or gambling is implemented. The striped tent is a nod to `/casino`.
+- No files outside this directory or git operations are needed. Module syntax can be checked without a temporary file: `node --input-type=module --check < city.js`.
 
 ## Open the demo
 
@@ -89,7 +93,7 @@ Recommended HTTP statuses: `200` accepted, `400` malformed action/text/coordinat
 
 ## Working local stub
 
-`city.js` exports the `AgentAPI` class and one ready instance as `window.agentAPI` after the world loads. Its methods are asynchronous and mirror the read/action contract:
+`city.js` is an ES module exporting `AgentAPI` and `AGENT_MODE`. It also exposes the `AgentAPI` class as `window.AgentAPI` and one ready instance as `window.agentAPI` after the world loads. Its methods are asynchronous and mirror the read/action contract:
 
 | Method | Future endpoint | Local behavior |
 | --- | --- | --- |
@@ -116,7 +120,7 @@ A valid action takes control of its named muse; other muses keep their existing 
 
 Taking control or replacing a move snaps to the nearest current tile, at most half a tile along the current route. A new move replaces the old route. On arrival the controlled muse idles until its next command. `say` lasts seven seconds, `emote` lasts four, and both leave an existing agent route running. New speech/emotes replace previous ones. Invalid actions are rejected before changing state. Waiting for `action()` only waits for acceptance; poll `getMuses()` for arrival. `release()` returns to scripting; changing the camera alone does not release agent control.
 
-At city scale, acting NPCs show short action captions to keep the map readable. Follow a muse to see its thought bubbles at a larger scale. Speech is plain text drawn onto canvas and inserted with `textContent`, never interpreted as HTML.
+Floating canvas-texture sprites show names and action captions. At city scale, walking muses hide their action captions to keep the map readable. Follow a muse to see its thought bubbles at a larger scale. Controlled speech is also visible without following. Speech is plain text drawn onto canvas and inserted with `textContent`, never interpreted as HTML.
 
 ## Wiring a backend later
 
