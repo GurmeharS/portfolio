@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // API coordinates (x, y) map to scene coordinates (x, elevation, z).
 const $ = id => document.getElementById(id);
@@ -6,7 +7,7 @@ const canvas = $('world');
 const params = new URLSearchParams(location.search);
 export const AGENT_MODE = params.has('drive') || params.get('agent') === '1';
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const BUILD_ID = '2026-09-25-lanternfix';
+const BUILD_ID = '2026-09-25-smooth';
 const DEBUG = params.get('debug') === '1';
 let lastPointer = 'none', lastSnapshotAt = 0, fpsEMA = 60;
 let frameCount = 0, frameError = null, initDone = false, consecFrameErrors = 0;
@@ -35,7 +36,7 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const noise = (x, y) => ((x * 374761393 + y * 668265263) >>> 0) % 101 / 101;
 let world, muses = [], followed = null, renderer, scene, camera, sun, moon, ambient;
 let lastFrame = 0, elapsed = 0, worldTime = 62, night = 0, hudTimer = 0, saveTimer = 0, lastDispatch = 0;
-let zoom = 1, cameraDistance = 90, overviewDistance = 90, running = true;
+let zoom = 1, cameraDistance = 90, overviewDistance = 90, running = true, controls = null;
 const target = new THREE.Vector3(32, 0, 24);
 const desiredTarget = new THREE.Vector3();
 const cameraOffset = new THREE.Vector3(.22, 1.19, 1).normalize(); // ~49 degrees above ground
@@ -607,8 +608,20 @@ function buildRoster() {
 }
 function follow(m) {
   followed = m; zoom = 1;
-  $('hint').textContent = m ? `Following ${m.name} · Esc to release` : 'Pick a muse. Stay a while.';
+  if (controls) {
+    controls.enabled = !m;
+    if (!m) controls.target.copy(target);
+  }
+  $('hint').textContent = m ? `Following ${m.name} · Esc to release` : 'Drag to look around · tap a muse to follow';
   updateHUD(); save();
+}
+function resetOverview() {
+  follow(null);
+  if (controls) {
+    controls.target.set(32, 0, 24);
+    camera.position.set(32, 0, 24).addScaledVector(cameraOffset, overviewDistance / zoom);
+    controls.update();
+  }
 }
 function describeEvent(e) {
   const p = e.payload || {}, muse = e.muse || 'The city';
@@ -668,7 +681,7 @@ function restore() {
     if (Number.isFinite(data.zoom)) zoom = clamp(data.zoom, .65, 2.3);
     for (const item of data.muses || []) {
       const m = muses.find(m => m.name === item.name);
-      if (m && walkable(item.x, item.y)) { m.x = item.x; m.y = item.y; m.state = 'idle'; m.action = 'taking in the view'; m.timer = 1; }
+      if (m && walkable(item.x, item.y)) { m.x = item.x; m.y = item.y; m.rx = item.x; m.ry = item.y; m.state = 'idle'; m.action = 'taking in the view'; m.timer = 1; }
     }
     followed = muses.find(m => m.name === data.followed) || null;
   } catch { /* An old/malformed save must not prevent startup. */ }
@@ -676,7 +689,7 @@ function restore() {
 function resize() {
   if (!renderer) return;
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)); renderer.setSize(w, h, false);
   camera.aspect = w / h;
   const mobile = w <= 760;
   // Reserve HUD space with an asymmetric frustum, keeping the island centered
@@ -689,7 +702,14 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 function updateCamera(dt, instant = false) {
-  desiredTarget.set(followed ? followed.x + .5 : 32, followed ? 1 : 0, followed ? followed.y + .5 : 24);
+  if (controls) controls.enabled = !followed;
+  if (!followed && controls) {
+    controls.update();
+    cameraDistance = camera.position.distanceTo(controls.target);
+    scene.fog.near = cameraDistance + 35; scene.fog.far = cameraDistance + 220;
+    return;
+  }
+  desiredTarget.set(followed ? followed.rx + .5 : 32, followed ? 1 : 0, followed ? followed.ry + .5 : 24);
   const blend = reducedMotion || instant ? 1 : 1 - Math.exp(-dt * 3.6);
   target.lerp(desiredTarget, blend);
   const distance = (followed ? Math.max(22, 17 / camera.aspect) : overviewDistance) / zoom;
@@ -743,7 +763,7 @@ function animateScenery(t) {
 function animateMuse(m, t) {
   const walking = m.state === 'walking';
   const stride = !reducedMotion && walking ? Math.sin(t * 9 + m.index) * .55 : 0;
-  m.root.position.set(m.x + .5, .14, m.y + .5);
+  m.root.position.set(m.rx + .5, .14, m.ry + .5);
   m.body.position.y = Math.abs(stride) * .14;
   m.body.rotation.y = m.facing === 'left' ? -Math.PI / 2 : m.facing === 'right' ? Math.PI / 2 : m.facing === 'up' ? Math.PI : 0;
   m.legs[0].rotation.x = stride; m.legs[1].rotation.x = -stride;
@@ -770,10 +790,17 @@ function frame(timestamp) {
   if (!document.hidden) {
     elapsed += dt; if (!serverLive) worldTime = (worldTime + dt) % world.dayLengthSeconds;
     clockUniform.value = reducedMotion ? 0 : elapsed;
-    for (const m of muses) { if (!serverLive) updateMuse(m, dt); animateMuse(m, elapsed); }
+    for (const m of muses) {
+      if (!serverLive) updateMuse(m, dt);
+      // Glide toward the authoritative tile so 1Hz server ticks read as
+      // walking instead of teleporting.
+      const glide = 1 - Math.exp(-dt * 6);
+      m.rx += (m.x - m.rx) * glide; m.ry += (m.y - m.ry) * glide;
+      animateMuse(m, elapsed);
+    }
     animateScenery(elapsed); updateLighting(); updateCamera(dt);
     selection.visible = !!followed;
-    if (followed) selection.position.set(followed.x + .5, .16, followed.y + .5);
+    if (followed) selection.position.set(followed.rx + .5, .16, followed.ry + .5);
     hudTimer += dt; saveTimer += dt;
     if (hudTimer > .25) { updateHUD(); if (DEBUG) updateDebug(); hudTimer = 0; }
     if (saveTimer > 5) { save(); saveTimer = 0; }
@@ -805,6 +832,12 @@ async function init() {
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); scene.background = skyDay.clone(); scene.fog = new THREE.Fog(skyDay, 150, 340);
     camera = new THREE.PerspectiveCamera(35, 1, .1, 600);
+    controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true; controls.dampingFactor = .08;
+    controls.target.set(32, 0, 24);
+    controls.minDistance = 30; controls.maxDistance = 170;
+    controls.maxPolarAngle = Math.PI * .49;
+    camera.position.set(32, 0, 24).addScaledVector(cameraOffset, overviewDistance);
     ambient = new THREE.HemisphereLight('#e6efe1', '#6a755e', 1.8); scene.add(ambient);
     sun = new THREE.DirectionalLight('#ffebc5', 2.6); sun.position.set(10, 55, 12); sun.target.position.set(32, 0, 24); scene.add(sun, sun.target);
     sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
@@ -823,7 +856,7 @@ async function init() {
     const starts = ['market', 'casino', 'fountain', 'workshop', 'garden', 'docks'];
     muses = palettes.map((palette, i) => {
       const poi = world.pointsOfInterest.find(p => p.id === starts[i]);
-      return { name: palette.name, palette, x: poi.x, y: poi.y, speed: 1.65 + i * .08, state: 'acting', action: poi.action,
+      return { name: palette.name, palette, x: poi.x, y: poi.y, rx: poi.x, ry: poi.y, speed: 1.65 + i * .08, state: 'acting', action: poi.action,
         destination: poi, path: [], timer: 7 + i * 1.7, facing: 'down', bubble: '', bubbleTimer: 0, emoteTimer: 0, controlled: false };
     });
     restore(); muses.forEach(buildMuse); buildRoster();
@@ -843,7 +876,7 @@ async function init() {
       dispatch(`${driven.name} is ready. Enter a key to drop in.`);
     }
     else if (params.has('drive')) dispatch('Unknown muse in ?drive. Use an exact roster name; agent mode is available.');
-    $('hint').textContent = followed ? `Following ${followed.name} · Esc to release` : 'Pick a muse. Stay a while.';
+    $('hint').textContent = followed ? `Following ${followed.name} · Esc to release` : 'Drag to look around · tap a muse to follow';
     resize(); updateCamera(0, true); updateHUD(); updateLighting();
     for (const m of muses) animateMuse(m, 0);
     initDone = true;
@@ -872,17 +905,25 @@ canvas.addEventListener('pointerup', event => {
   const touchRadius = event.pointerType === 'touch' ? 44 : 17;
   for (const m of muses) {
     const hits = raycaster.intersectObject(m.body, true);
-    projected.set(m.x + .5, 1.2, m.y + .5).project(camera);
+    projected.set(m.rx + .5, 1.2, m.ry + .5).project(camera);
     const distance = Math.hypot((projected.x + 1) * innerWidth / 2 - event.clientX, (1 - projected.y) * innerHeight / 2 - event.clientY);
     if ((hits.length || distance < touchRadius) && distance < nearest) { picked = m; nearest = distance; }
   }
   follow(picked);
 });
-function changeZoom(factor) { zoom = clamp(zoom * factor, .65, 2.3); save(); }
+function changeZoom(factor) {
+  if (!followed && controls) {
+    const offset = camera.position.clone().sub(controls.target);
+    offset.setLength(clamp(offset.length() / factor, 30, 170));
+    camera.position.copy(controls.target).add(offset);
+    return;
+  }
+  zoom = clamp(zoom * factor, .65, 2.3); save();
+}
 $('zoom-in').addEventListener('click', () => changeZoom(1.2));
 $('zoom-out').addEventListener('click', () => changeZoom(1 / 1.2));
-$('overview').addEventListener('click', () => follow(null));
-canvas.addEventListener('wheel', event => { event.preventDefault(); changeZoom(event.deltaY < 0 ? 1.07 : 1 / 1.07); }, { passive: false });
+$('overview').addEventListener('click', resetOverview);
+canvas.addEventListener('wheel', event => { if (!followed) return; event.preventDefault(); changeZoom(event.deltaY < 0 ? 1.07 : 1 / 1.07); }, { passive: false });
 window.addEventListener('keydown', event => { if (event.key === 'Escape') follow(null); });
 window.addEventListener('resize', resize);
 window.addEventListener('pagehide', save);
