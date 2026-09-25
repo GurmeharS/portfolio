@@ -6,10 +6,10 @@ const canvas = $('world');
 const params = new URLSearchParams(location.search);
 export const AGENT_MODE = params.has('drive') || params.get('agent') === '1';
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const BUILD_ID = '2026-09-25-touch44';
+const BUILD_ID = '2026-09-25-lanternfix';
 const DEBUG = params.get('debug') === '1';
 let lastPointer = 'none', lastSnapshotAt = 0, fpsEMA = 60;
-let frameCount = 0, frameError = null, initDone = false;
+let frameCount = 0, frameError = null, initDone = false, consecFrameErrors = 0;
 let debugStrip = null;
 if (DEBUG) {
   debugStrip = document.createElement('div');
@@ -138,10 +138,10 @@ function connectCity() {
       m.shells = incoming.shells ?? m.shells ?? 0;
       const flair = incoming.flair || '';
       if (flair !== (m.flair || '')) { m.flair = flair; writeLabel(m.tag, m.name + (flair ? ' ✦ ' + flair : '')); }
-      if (incoming.lantern && incoming.lantern !== m.lantern) {
-        m.lantern = incoming.lantern;
-        m.keepsake.material = new THREE.MeshStandardMaterial({ color: m.lantern, roughness: 1, flatShading: true, emissive: m.lantern, emissiveIntensity: .35 });
-        m.row?.style.setProperty('--lantern', m.lantern);
+      if (incoming.lantern && incoming.lantern !== m.lanternColor) {
+        m.lanternColor = incoming.lantern;
+        m.keepsake.material = new THREE.MeshStandardMaterial({ color: m.lanternColor, roughness: 1, flatShading: true, emissive: m.lanternColor, emissiveIntensity: .35 });
+        m.row?.style.setProperty('--lantern', m.lanternColor);
       }
     }
     economy.turn = state.turn ?? 0; economy.pendingTurns = state.pendingTurns || [];
@@ -779,11 +779,17 @@ function frame(timestamp) {
     if (saveTimer > 5) { save(); saveTimer = 0; }
     renderer.render(scene, camera);
   }
-  frameCount++;
+  frameCount++; consecFrameErrors = 0;
   } catch (error) {
-    frameError = error; running = false;
+    consecFrameErrors++;
+    if (!frameError || frameError.message !== error.message) {
+      frameError = error;
+      console.error('Agent City frame:', error);
+    }
+    // A single bad frame must never freeze the city; only give up after a
+    // full second of consecutive failures.
+    if (consecFrameErrors > 60) running = false;
     if (DEBUG) updateDebug();
-    console.error('Agent City frame:', error);
   }
   requestAnimationFrame(frame);
 }
