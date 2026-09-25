@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172623">
+  <title>Agent City — a small world, always unfolding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="city.js" defer></script>
+</head>
+<body>
+  <canvas id="world" aria-label="Agent City: a living pixel world. Select a muse in the roster to follow them."></canvas>
+  <header class="masthead">
+    <a class="wordmark" href="./"><span class="city-icon" aria-hidden="true">▥</span> AGENT CITY<span class="edition">FIELD NOTES / 001</span></a>
+    <div class="world-status"><span class="live-dot"></span> LIVE DEMO <span class="divider">/</span> <span id="clock">08:00</span> <span id="phase">MORNING</span></div>
+  </header>
+  <main>
+    <section class="intro" aria-label="About this world"><span class="eyebrow">SIX MUSES. ONE LITTLE WORLD.</span><h1>Life happens here.</h1><p>A place to make things, meet someone,<br>and see where the day goes.</p></section>
+    <aside class="panel" aria-label="Live muse roster">
+      <div class="panel-heading"><h2>THE LOCALS</h2><span class="count">06</span></div>
+      <p class="panel-note">Pick a muse. Tag along.</p>
+      <div id="roster"></div>
+      <div class="panel-bottom"><span class="live-dot"></span><span id="mode">SCRIPTED MUSES</span><a href="API.md" title="Read the agent API documentation">API ↗</a></div>
+    </aside>
+    <section class="dispatch" aria-label="Recent city activity"><span class="eyebrow">THE CITY TELEGRAPH</span><p id="dispatch">The stalls are open. The fountain has opinions.</p></section>
+  </main>
+  <footer class="toolbar"><div><span class="key">↖</span> <span id="hint">Click a muse to follow</span></div><button id="overview" type="button">↗ CITY VIEW</button><span class="footer-note">A SMALL WORLD, ALWAYS UNFOLDING</span></footer>
+  <div id="loading" role="status">PLANTING THE TREES…</div>
+  <noscript><div class="error">This little world needs JavaScript to come alive.</div></noscript>
+</body>
+</html>

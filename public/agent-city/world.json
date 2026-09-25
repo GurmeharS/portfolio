@@ -1,0 +1,574 @@
+{
+  "version": 1,
+  "name": "Agent City",
+  "seed": 27,
+  "width": 64,
+  "height": 48,
+  "tileSize": 16,
+  "dayLengthSeconds": 180,
+  "legend": {
+    "g": "garden grass",
+    "h": "harbor ground",
+    "f": "forum stone",
+    "c": "workshop earth",
+    "s": "sand",
+    "w": "water",
+    "p": "path",
+    "d": "dock",
+    "b": "occupied"
+  },
+  "walkable": [
+    "g",
+    "h",
+    "f",
+    "c",
+    "s",
+    "p",
+    "d"
+  ],
+  "tiles": [
+    "wwwwwwwwwwwssshhhhhhhhhhhhhhhhhhhhhhffffffffffffffffffffffffffff",
+    "wwwwwwwwwwwssshhhhhhhhhhhhhhhhhhhhhhffffffffffffffffffffffffffff",
+    "wwwwwwwwwwwssshhhhhhhhhhhhhhhhhhhhhhffffffffffffffffffffffffffff",
+    "wwwwwwwwwwwssshhhhhhhhhhhhhhhhhhhhhhffffffffffffffffffffffffffff",
+    "wwwwwwwwwwwssshhhhhhhhhhhhhhhhhhhhhhffffffffffffffffffffffffffff",
+    "wwwwwwwwwwsssshhhpphbbbbbbbbbhhhhpphfbbbbbbbbfffppfffffffffppfff",
+    "wwwwwwwwwwsssshhhpphbbbbbbbbbhhhhpphfbbbbbbbbfffppffbbbbbbfppfff",
+    "wwwwwwwwwwsssshbhpphbbbbbbbbbhbhhpphbbbbbbbbbfffppffbbbbbbfppfff",
+    "wwwwwwwwwwsssshhhpphbbbbbbbbbhhhhpphfbbbbbbbbfffppffbbbbbbfppfff",
+    "wwwwwwwwwwsssshhbpphbbbbbbbbbhbhhpphfbbbbbbbbfffppffbbbbbbfppfff",
+    "wwwdddddddddddddddphhhhhhhhhhhhhhpphffffffffffffppffbbbbbbfppfff",
+    "wwwdddddddddddddddphhhhhhhhhhhhhbpphfffffffffffbppfffffffffppfff",
+    "wwwdddddddddddddddppppppppppppppppppppppppppppppppppppppppppppff",
+    "wwwwwwwwwwwsppppppppppppppppppppppppppppppppppppppppppppppppppff",
+    "wwwwwwwwwwwssshhhpphhhhhhhhhhhhhhpphffbbffffffffppfffffffffppfff",
+    "wwwwwwwwwwwssshhhpphhhhhhhhhhhhhhpphffffffffffffppfffffffffppfff",
+    "wwwwwwwwwwwssshhhpphhhbbbbhhbbbbhpphffffffffffffppffffffbffppfff",
+    "wwwwwwwwwwwssshhhpphhhbbbbhhbbbbhpphffffffbbbbffppfffffffffppfff",
+    "wwwwwwwwwwsssshhhpphhhbbbbhhbbbbhpphffffffbbbbffpbbbfffffffppfff",
+    "wwwdddddddddddddddphhhhhhhhhhhhhhpphfbffffbbbbffppfffffbfffppfff",
+    "wwwdddddddddddddddphhhhhhhhhhhhhhpphffffffbbbbffppfffffffffppfff",
+    "wwwdddddddddddddddphhhhhhhhhhhhhhpphffffffffffffppfffffffffppfff",
+    "wwwwwwwwwwsssshhhpphhhhhhhhhhhhhhpphfffbbbffffffppffffffffbppfff",
+    "wwwwwwwwwwssppppppppppppppppppppppppppppppppppppppppppppppppppff",
+    "wwwwwwwwwwssppppppppppppppppppppppppppppppppppppppppppppppppppff",
+    "wwwwwwwwwwsssscccppccccccccccccccppcggggggggggggppgggggggggppggg",
+    "wwwwwwwwwwwssscccppccccccccccccccppcggggggggggggppgggggggggppggg",
+    "wwwwwwwwwwwssscccppbbbbbbbbbbccccppcggggggggggggppgggggggggppggg",
+    "wwwwwwwwwwwssscbcppbbbbbbbbbbccccppcgbbbbbbbgggbppgggggggggppggg",
+    "wwwwwwwwwwwssscccppbbbbbbbbbbccccppcgbbbbbbbggggppgbggbggggppggg",
+    "wwwwwwwwwwwssscccppbbbbbbbbbbccbcppcgbbbbbbbggggppgggggggggppggg",
+    "wwwwwwwwwwsssscccppbbbbbbbbbbccccppcgbbbbbbbggggppgggggggggppggg",
+    "wwwwwwwwwwsssscccppbbbbbbbbbbccccppcgbbbbbbbggggppgbggbggggppggg",
+    "wwwwwwwwwwsssscccppccccccccccccccppcggggggggggggppgggggggggppggg",
+    "wwwwwwwwwwsssscccbpcccccccccccccbppcgggggggggggbppgggggggggppggg",
+    "wwwwwwwwwwssppppppppppppppppppppppppppppppppppppppppppppppppppgg",
+    "wwwwwwwwwwssppppppppppppppppppppppppppppppppppppppppppppppppppgg",
+    "wwwwwwwwwwsssscccppccccccccccccccppcggggggggggggppggbbbggggppggg",
+    "wwwwwwwwwwsssscccppcccbbbcccbbbccppcggggggggggggppgbggbggggppggg",
+    "wwwwwwwwwwwssscccppcccbbbcccbbbccppcggggggggggggppgggggggggppggg",
+    "wwwwwwwwwwwssscccppccccccccccccccppcgggggggbbbggppgggggggggppggg",
+    "wwwwwwwwwwwssscccppccccccccccccccppcggggggggggggppgbgggggbbppggg",
+    "wwwwwwwwwwwssscccppccccccccccccccppcggggggggggbgppgggggggggppggg",
+    "wwwwwwwwwwwssscccppcbccccccccccccppcggggggggggggppgggggggggppggg",
+    "wwwwwwwwwwssssccccccccccccccccccccccbgggggbggbgggggbggbggbgggggg",
+    "wwwwwwwwwwssssccccccccccccccccccccccgggggggggggggggggggggggggggg",
+    "wwwwwwwwwwssssccccccccccccccccccccccgggggggggggggggggggggggggggg",
+    "wwwwwwwwwwssssccccccccccccccccccccccgggggggggggggggggggggggggggg"
+  ],
+  "districts": [
+    {
+      "id": "harbor",
+      "name": "THE HARBOR",
+      "bounds": [
+        0,
+        0,
+        36,
+        25
+      ],
+      "tint": "#8b9671",
+      "foundedBy": "Big Benjamin",
+      "description": "Founded by Big Benjamin. Trade, small fortunes, and excellent sea air."
+    },
+    {
+      "id": "forum",
+      "name": "THE FORUM",
+      "bounds": [
+        36,
+        0,
+        28,
+        25
+      ],
+      "tint": "#9d9f89",
+      "description": "A public square for private thoughts."
+    },
+    {
+      "id": "workshop",
+      "name": "THE WORKSHOP",
+      "bounds": [
+        0,
+        25,
+        36,
+        23
+      ],
+      "tint": "#9b896b",
+      "description": "Make something worth keeping."
+    },
+    {
+      "id": "garden",
+      "name": "THE GARDEN",
+      "bounds": [
+        36,
+        25,
+        28,
+        23
+      ],
+      "tint": "#738764",
+      "description": "Nothing urgent grows here."
+    }
+  ],
+  "objects": [
+    {
+      "kind": "building",
+      "x": 20,
+      "y": 5,
+      "width": 9,
+      "height": 5,
+      "label": "HARBOR EXCHANGE",
+      "palette": "ochre"
+    },
+    {
+      "kind": "building",
+      "x": 37,
+      "y": 5,
+      "width": 8,
+      "height": 5,
+      "label": "POST & PARCEL",
+      "palette": "slate"
+    },
+    {
+      "kind": "building",
+      "x": 19,
+      "y": 27,
+      "width": 10,
+      "height": 6,
+      "label": "THE MAKERY",
+      "palette": "rust"
+    },
+    {
+      "kind": "building",
+      "x": 37,
+      "y": 28,
+      "width": 7,
+      "height": 5,
+      "label": "GLASSHOUSE",
+      "palette": "sage"
+    },
+    {
+      "kind": "stall",
+      "x": 22,
+      "y": 16,
+      "width": 4,
+      "height": 3
+    },
+    {
+      "kind": "stall",
+      "x": 28,
+      "y": 16,
+      "width": 4,
+      "height": 3
+    },
+    {
+      "kind": "fountain",
+      "x": 42,
+      "y": 17,
+      "width": 4,
+      "height": 4
+    },
+    {
+      "kind": "tent",
+      "x": 52,
+      "y": 6,
+      "width": 6,
+      "height": 5,
+      "label": "CASINO"
+    },
+    {
+      "kind": "notice",
+      "x": 38,
+      "y": 14,
+      "width": 2,
+      "height": 1
+    },
+    {
+      "kind": "bench",
+      "x": 39,
+      "y": 22,
+      "width": 3,
+      "height": 1
+    },
+    {
+      "kind": "bench",
+      "x": 49,
+      "y": 18,
+      "width": 3,
+      "height": 1
+    },
+    {
+      "kind": "bench",
+      "x": 52,
+      "y": 37,
+      "width": 3,
+      "height": 1
+    },
+    {
+      "kind": "bench",
+      "x": 43,
+      "y": 40,
+      "width": 3,
+      "height": 1
+    },
+    {
+      "kind": "workbench",
+      "x": 22,
+      "y": 38,
+      "width": 3,
+      "height": 2
+    },
+    {
+      "kind": "workbench",
+      "x": 28,
+      "y": 38,
+      "width": 3,
+      "height": 2
+    },
+    {
+      "kind": "lamp",
+      "x": 16,
+      "y": 9,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 32,
+      "y": 11,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 47,
+      "y": 11,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 58,
+      "y": 22,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 32,
+      "y": 34,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 47,
+      "y": 34,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 17,
+      "y": 34,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "lamp",
+      "x": 58,
+      "y": 41,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "sign",
+      "x": 15,
+      "y": 7,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "sign",
+      "x": 36,
+      "y": 7,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "sign",
+      "x": 15,
+      "y": 28,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "sign",
+      "x": 47,
+      "y": 28,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 51,
+      "y": 29,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 54,
+      "y": 29,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 51,
+      "y": 32,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 54,
+      "y": 32,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 51,
+      "y": 38,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 54,
+      "y": 38,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 51,
+      "y": 41,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 57,
+      "y": 41,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 36,
+      "y": 44,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 42,
+      "y": 44,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 45,
+      "y": 44,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 51,
+      "y": 44,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 54,
+      "y": 44,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 57,
+      "y": 44,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 30,
+      "y": 7,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 30,
+      "y": 9,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 37,
+      "y": 19,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 56,
+      "y": 16,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 55,
+      "y": 19,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 20,
+      "y": 43,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 31,
+      "y": 30,
+      "width": 1,
+      "height": 1
+    },
+    {
+      "kind": "tree",
+      "x": 46,
+      "y": 42,
+      "width": 1,
+      "height": 1
+    }
+  ],
+  "pointsOfInterest": [
+    {
+      "id": "docks",
+      "name": "Old Salt Docks",
+      "x": 7,
+      "y": 11,
+      "action": "fishing",
+      "district": "harbor"
+    },
+    {
+      "id": "market",
+      "name": "Token Market",
+      "x": 24,
+      "y": 20,
+      "action": "trading tokens",
+      "district": "harbor"
+    },
+    {
+      "id": "exchange",
+      "name": "Harbor Exchange",
+      "x": 24,
+      "y": 10,
+      "action": "balancing the books",
+      "district": "harbor"
+    },
+    {
+      "id": "fountain",
+      "name": "Wishing Fountain",
+      "x": 44,
+      "y": 22,
+      "action": "chatting",
+      "district": "forum"
+    },
+    {
+      "id": "notice",
+      "name": "Notice Board",
+      "x": 38,
+      "y": 15,
+      "action": "posting notice",
+      "district": "forum"
+    },
+    {
+      "id": "casino",
+      "name": "Striped Tent",
+      "x": 54,
+      "y": 11,
+      "action": "counting lucky stars",
+      "district": "forum"
+    },
+    {
+      "id": "workshop",
+      "name": "The Makery",
+      "x": 24,
+      "y": 33,
+      "action": "building",
+      "district": "workshop"
+    },
+    {
+      "id": "benches",
+      "name": "Workshop Benches",
+      "x": 26,
+      "y": 40,
+      "action": "tinkering",
+      "district": "workshop"
+    },
+    {
+      "id": "garden",
+      "name": "Quiet Corner",
+      "x": 53,
+      "y": 38,
+      "action": "napping",
+      "district": "garden"
+    },
+    {
+      "id": "glasshouse",
+      "name": "Glasshouse",
+      "x": 40,
+      "y": 33,
+      "action": "watering plants",
+      "district": "garden"
+    },
+    {
+      "id": "park",
+      "name": "Mossy Bench",
+      "x": 44,
+      "y": 41,
+      "action": "cloud watching",
+      "district": "garden"
+    }
+  ]
+}
