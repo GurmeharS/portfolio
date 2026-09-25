@@ -1,0 +1,71 @@
+/* Presentation surfaces only. Transforms dominate; no canvas, framework or assets. */
+.floor-grid {grid-template-columns:repeat(4,minmax(0,1fr))}
+#reveal-art {display:block;width:100%;margin:24px auto 0;max-width:620px}
+.game-render {border-top:1px solid #b79b553d;padding-top:16px}
+.render-topline {display:flex;justify-content:space-between;gap:12px;font-size:9px;letter-spacing:.13em;color:#cbb780}
+.game-stage {position:relative;display:flex;align-items:center;justify-content:center;min-height:245px;perspective:850px;isolation:isolate}
+.game-stage:focus-visible {outline:1px solid #cbb780;outline-offset:4px}
+.felt-center .render-caption {max-width:560px;color:#e0d6bb;min-height:38px;line-height:1.6}
+.render-live-note {padding-top:8px}
+.render-controls {display:flex;justify-content:center;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px}
+.render-controls label {display:flex;align-items:center;gap:8px;font-size:11px;color:#cbb780}
+.render-controls select {max-width:190px;background:#172f27;color:#eee6ce;border:1px solid #8e7950;padding:8px}
+.render-controls button {min-height:40px}
+.render-controls [aria-pressed="true"] {color:#f3d88e;box-shadow:inset 0 -1px #cbb780}
+.coin-flight {width:156px;height:156px;transform-style:preserve-3d;z-index:2}
+.club-coin {position:relative;width:100%;height:100%;transform-style:preserve-3d}
+.coin-face {position:absolute;inset:0;border-radius:50%;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:radial-gradient(ellipse at 35% 25%,#d7bc79,#a38443 55%,#69532d);box-shadow:0 0 0 2px #6e572e,0 0 0 4px #ad8b49,inset 0 0 15px #2a1c1370}
+.coin-heads {transform:translateZ(3px)}
+.coin-tails {transform:rotateY(180deg) translateZ(3px)}
+.coin-face svg {width:100%;height:100%;fill:none}
+.coin-rim {stroke:#e4cc8d;stroke-width:2}
+.coin-milling {stroke:#6b502a;stroke-width:7;stroke-dasharray:1 3}
+.coin-field {fill:#93713622;stroke:#f1dca177;stroke-width:1.5}
+.coin-laurel {stroke:#654721;stroke-width:2;filter:drop-shadow(0 1px #e2c889)}
+.coin-face text {text-anchor:middle;fill:#5d421f;paint-order:stroke;stroke:#edce8650;stroke-width:.5}
+.coin-inscription {font:10px Georgia,serif;letter-spacing:2px}
+.coin-tiny {font:6px Georgia,serif;letter-spacing:1.2px}
+.coin-crest {font:64px Georgia,serif}
+.coin-shadow {position:absolute;width:150px;height:21px;background:radial-gradient(ellipse,#050c09aa,transparent 70%);bottom:33px;border-radius:50%}
+.side-plaques {position:absolute;bottom:0;display:flex;justify-content:space-between;width:100%;font-size:10px;letter-spacing:.16em;color:#99aa9b}
+.landed-side {color:#edcf82;border-bottom:1px solid #d3b96f;padding-bottom:4px}
+.game-waiting .club-coin {transform:rotateX(12deg) rotateY(-18deg)}
+.dice-tray {display:grid;grid-template-columns:repeat(6,44px);gap:16px;perspective:750px;padding-bottom:35px}
+.die-space {width:44px;height:44px;perspective:500px}
+.pip-cube {width:44px;height:44px;position:relative;transform-style:preserve-3d}
+.cube-face {position:absolute;inset:0;border-radius:7px;background:linear-gradient(140deg,#fff8e6,#d7cdb0);border:1px solid #b5a787;backface-visibility:hidden;box-shadow:inset 0 0 5px #fff7e2}
+.cube-face svg {width:100%;height:100%;fill:#35291f}
+.face-0 {transform:translateZ(22px)}.face-1 {transform:rotateY(180deg) translateZ(22px)}
+.face-2 {transform:rotateY(90deg) translateZ(22px)}.face-3 {transform:rotateY(-90deg) translateZ(22px)}
+.face-4 {transform:rotateX(90deg) translateZ(22px)}.face-5 {transform:rotateX(-90deg) translateZ(22px)}
+.blank-die {width:44px;height:44px;border:1px solid #b4a77855;background:#d9d0b115;border-radius:7px;color:#a99b76;font:32px Georgia,serif;text-align:center}
+.dice-total {position:absolute;bottom:5px;font:36px var(--serif);color:#c0c5b3}
+.dice-total small {display:block;font:9px var(--sans);letter-spacing:.15em}
+.winning-total {color:#ead08c;text-shadow:0 2px 15px #c1a75c33}
+.reel-cabinet {display:flex;gap:9px;background:linear-gradient(125deg,#513b2b,#251f19);border:2px solid #887247;border-radius:12px;padding:18px 13px;box-shadow:inset 0 0 0 3px #251e18,0 15px 22px #0003}
+.reel-window {position:relative;width:80px;height:80px;overflow:hidden;border-radius:5px;background:#e6dec6;color:#352b21;box-shadow:0 0 0 1px #b39a66}
+.reel-window:after {content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(#3c2e2433,transparent 27%,transparent 70%,#3c2e2444);border-top:1px solid #fff5dc}
+.reel-symbol {height:80px;display:flex;flex-direction:column;justify-content:center;align-items:center;background:linear-gradient(90deg,#d4cbb3,#faf3df 45%,#dbd2b9)}
+.reel-symbol span {font:42px Georgia,serif;line-height:48px}
+.reel-symbol small {font:10px Georgia,serif;line-height:14px}
+.reel-sealed {display:grid;place-items:center;font:42px Georgia,serif;color:#917f5d}
+.ascent-chart {display:block;width:100%;max-width:500px;height:auto;overflow:visible}
+.chart-grid {stroke:#b9b59125;fill:none;stroke-width:1}
+.ascent-chart text {fill:#cbb780;font:9px Georgia,serif}
+.ascent-curve {fill:none;stroke:#e2c583;stroke-width:2.5;stroke-linecap:round}
+.crash-marker {fill:#e2c583;stroke:#322b1b;stroke-width:1}
+.crash-marker text {font-size:15px;stroke:none}
+@media(max-width:1000px) and (min-width:701px) {.floor-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px) {
+ .floor-grid {grid-template-columns:1fr}
+ .game-stage {min-height:235px}
+ .dice-tray {grid-template-columns:repeat(3,44px);gap:16px 23px;padding-bottom:50px}
+ .coin-flight {width:138px;height:138px}
+ .reel-cabinet {gap:5px;padding:15px 8px}
+ .reel-window {width:60px}
+ .render-topline {font-size:8px;letter-spacing:.06em}
+ .render-controls {gap:7px}
+ .render-controls select {max-width:145px}
+ .render-controls .copy {font-size:10px}
+}
+@media(prefers-reduced-motion:reduce) {.game-stage * {animation:none!important;transition:none!important}}
