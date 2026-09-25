@@ -9,17 +9,21 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BUILD_ID = '2026-09-25-touch44';
 const DEBUG = params.get('debug') === '1';
 let lastPointer = 'none', lastSnapshotAt = 0, fpsEMA = 60;
+let frameCount = 0, frameError = null, initDone = false;
 let debugStrip = null;
 if (DEBUG) {
   debugStrip = document.createElement('div');
   Object.assign(debugStrip.style, { position: 'fixed', top: '70px', left: '10px', zIndex: 50, background: 'rgba(10,20,18,.85)', color: '#cfe3d2', font: '10px/1.7 monospace', padding: '8px 10px', borderRadius: '6px', pointerEvents: 'none', whiteSpace: 'pre', maxWidth: 'calc(100vw - 20px)' });
   document.body.appendChild(debugStrip);
+  setInterval(updateDebug, 500);
 }
 function updateDebug() {
   if (!debugStrip) return;
   const snapAge = lastSnapshotAt ? ((performance.now() - lastSnapshotAt) / 1000).toFixed(1) + 's' : 'never';
   debugStrip.textContent =
-    `build ${BUILD_ID} · ${Math.round(fpsEMA)}fps\n` +
+    `build ${BUILD_ID} · frames ${frameCount} · ${Math.round(fpsEMA)}fps\n` +
+    `init ${initDone ? 'done' : 'PENDING'} · running ${running}\n` +
+    `frame error: ${frameError ? frameError.message : 'none'}\n` +
     `socket ${serverLive ? 'LIVE' : 'local'} · snap ${snapAge} · turn ${economy.turn}\n` +
     `pointer: ${lastPointer}\n` +
     `picked: ${followed ? followed.name : 'none'}`;
@@ -759,6 +763,7 @@ function animateMuse(m, t) {
 }
 function frame(timestamp) {
   if (!running) return;
+  try {
   const dt = lastFrame ? Math.min((timestamp - lastFrame) / 1000, .075) : 0;
   lastFrame = timestamp;
   if (dt > 0) fpsEMA += (1 / dt - fpsEMA) * .05;
@@ -773,6 +778,12 @@ function frame(timestamp) {
     if (hudTimer > .25) { updateHUD(); if (DEBUG) updateDebug(); hudTimer = 0; }
     if (saveTimer > 5) { save(); saveTimer = 0; }
     renderer.render(scene, camera);
+  }
+  frameCount++;
+  } catch (error) {
+    frameError = error; running = false;
+    if (DEBUG) updateDebug();
+    console.error('Agent City frame:', error);
   }
   requestAnimationFrame(frame);
 }
@@ -829,6 +840,7 @@ async function init() {
     $('hint').textContent = followed ? `Following ${followed.name} · Esc to release` : 'Pick a muse. Stay a while.';
     resize(); updateCamera(0, true); updateHUD(); updateLighting();
     for (const m of muses) animateMuse(m, 0);
+    initDone = true;
     $('loading').classList.add('hidden'); requestAnimationFrame(frame); connectCity();
   } catch (error) {
     renderer?.dispose(); $('loading').textContent = `The city could not open. ${error.message} Serve this folder over HTTP and reload.`;
