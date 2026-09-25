@@ -17,4 +17,4 @@ class_name = "CityRoom"
 
 [[migrations]]
 tag = "city-v1"
-new_classes = ["CityRoom"]
+new_sqlite_classes = ["CityRoom"]

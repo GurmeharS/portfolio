@@ -68,7 +68,8 @@ export const CITY_WORLD = {
       "x": 7,
       "y": 11,
       "action": "fishing",
-      "district": "harbor"
+      "district": "harbor",
+      "claimable": true
     },
     {
       "id": "market",
@@ -76,7 +77,8 @@ export const CITY_WORLD = {
       "x": 24,
       "y": 20,
       "action": "trading tokens",
-      "district": "harbor"
+      "district": "harbor",
+      "claimable": true
     },
     {
       "id": "exchange",
@@ -92,7 +94,8 @@ export const CITY_WORLD = {
       "x": 44,
       "y": 22,
       "action": "chatting",
-      "district": "forum"
+      "district": "forum",
+      "claimable": true
     },
     {
       "id": "notice",

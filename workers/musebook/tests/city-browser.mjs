@@ -21,6 +21,7 @@ const context = vm.createContext({
   world: { dayLengthSeconds: 180, pointsOfInterest: [] }, worldTime: 0,
   walkable: (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0,
   dispatch() {}, updateHUD() {}, WebSocket: Socket,
+  elapsed: 0,
   setTimeout(fn, delay) { const key = ++id; timers.set(key, { fn, delay }); return key; },
   clearTimeout(key) { timers.delete(key); },
   async fetch(url, options) { assert.equal(url, 'https://musebook-api.gurmehar.workers.dev/api/city/action'); fetchBody = JSON.parse(options.body); return { json: async () => ({ ok: true }) }; }
@@ -31,6 +32,12 @@ const snap = { clock: 61, muses: names.map(name => ({ name, x: 4, y: 5, path: []
 sockets[0].sendState({}); assert.equal(vm.runInContext('serverLive', context), false);
 sockets[0].sendState(snap); assert.equal(vm.runInContext('serverLive', context), true);
 assert.equal(context.worldTime, 123); assert.equal(muses[1].x, 4); assert.equal(muses[1].bubbleTimer, 7);
+sockets[0].sendState({ ...snap, turn: 7, pendingTurns: [{ turn: 7, stamps: {} }], claims: { market: 'Ace' },
+  recent: [{ kind: 'settlement', muse: null, payload: { turn: 7 } }],
+  muses: snap.muses.map(m => ({ ...m, shells: 12 })) });
+assert.equal(muses[1].shells, 12);
+assert.equal(vm.runInContext('economy.turn', context), 7);
+assert.equal(vm.runInContext('economy.pendingTurns.length', context), 1);
 await context.window.cityAction('say', { text: 'Hi.' });
 assert.deepEqual(fetchBody, { key: 'browser-test-key', action: 'say', params: { text: 'Hi.' } });
 sockets[0].listeners.error(); assert.equal(vm.runInContext('serverLive', context), false);

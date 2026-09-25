@@ -45,6 +45,8 @@ const thoughts = {
 
 const CITY_API = 'https://musebook-api.gurmehar.workers.dev';
 let serverLive = false, reconnectDelay = 1000, citySocket, reconnectTimer, streamWatchdog;
+const economy = { turn: 0, pendingTurns: [], recent: [], claims: {} };
+let tickerStart = 0;
 const driveName = params.get('drive');
 const keyStorage = `agent-city:key:${driveName || ''}`;
 let driveKey = '';
@@ -110,8 +112,18 @@ function connectCity() {
       m.bubbleTimer = Math.max(0, (incoming.bubble?.until || 0) - state.clock);
       m.emote = incoming.action?.kind === 'emote' ? incoming.action.label : null;
       m.emoteTimer = m.emote ? Math.max(0, incoming.action.until - state.clock) : 0;
+      m.shells = incoming.shells ?? m.shells ?? 0;
+      const flair = incoming.flair || '';
+      if (flair !== (m.flair || '')) { m.flair = flair; writeLabel(m.tag, m.name + (flair ? ' ✦ ' + flair : '')); }
+      if (incoming.lantern && incoming.lantern !== m.lantern) {
+        m.lantern = incoming.lantern;
+        m.keepsake.material = new THREE.MeshStandardMaterial({ color: m.lantern, roughness: 1, flatShading: true, emissive: m.lantern, emissiveIntensity: .35 });
+        m.row?.style.setProperty('--lantern', m.lantern);
+      }
     }
-    if (first) dispatch('Connected to the shared city. Six lives, unfolding together.');
+    economy.turn = state.turn ?? 0; economy.pendingTurns = state.pendingTurns || [];
+    economy.recent = state.recent || []; economy.claims = state.claims || {};
+    if (first) { dispatch('Connected to the shared city. Six lives, unfolding together.'); tickerStart = elapsed + 8; }
     updateHUD();
   });
   socket.addEventListener('close', retry);
@@ -562,10 +574,11 @@ function buildMuse(m, index) {
 function buildRoster() {
   for (const m of muses) {
     const row = document.createElement('button'); row.type = 'button'; row.className = 'muse-row';
-    row.innerHTML = '<span class="avatar" aria-hidden="true"></span><span class="muse-info"><span class="muse-name"></span><span class="muse-district"></span><span class="muse-action"></span></span><span class="follow-mark" aria-hidden="true">↗</span>';
+    row.innerHTML = '<span class="avatar" aria-hidden="true"></span><span class="muse-info"><span class="muse-name"></span><span class="muse-district"></span><span class="muse-action"></span></span><span class="muse-shells" aria-hidden="true"></span><span class="follow-mark" aria-hidden="true">↗</span>';
     row.style.setProperty('--shirt', m.palette.shirt); row.style.setProperty('--skin', m.palette.skin); row.style.setProperty('--hair', m.palette.hair);
     row.querySelector('.muse-name').textContent = m.name;
-    m.row = row; m.districtEl = row.querySelector('.muse-district'); m.actionEl = row.querySelector('.muse-action');
+    m.row = row; m.nameEl = row.querySelector('.muse-name'); m.districtEl = row.querySelector('.muse-district'); m.actionEl = row.querySelector('.muse-action');
+    m.shellsEl = row.querySelector('.muse-shells');
     row.addEventListener('click', () => follow(m === followed ? null : m)); $('roster').append(row);
   }
 }
@@ -574,12 +587,33 @@ function follow(m) {
   $('hint').textContent = m ? `Following ${m.name} · Esc to release` : 'Pick a muse. Stay a while.';
   updateHUD(); save();
 }
+function describeEvent(e) {
+  const p = e.payload || {}, muse = e.muse || 'The city';
+  switch (e.kind) {
+    case 'mint': return p.reason === 'work' ? `${muse} earned ${p.amount}◦ ${p.action} at ${p.poi}` :
+      p.reason === 'variety' ? `${muse} earned ${p.amount}◦ for mixing it up` :
+      p.reason === 'pioneer_grant' ? `${muse} arrived with ${p.amount}◦` : `${muse} minted ${p.amount}◦`;
+    case 'burn': return `${muse}'s stockpile overflowed; ${-p.amount}◦ burned`;
+    case 'transfer': return p.status === 'settled' ? `${e.muse} → ${p.counterparty}: ${-p.amount}◦` : `${muse}'s trade failed`;
+    case 'upkeep': return `${muse} paid 1◦ upkeep on ${p.poi}`;
+    case 'claim': return p.status === 'failed' ? `${muse}'s claim on ${p.poi} fell through` : `${muse} claimed ${p.poi}`;
+    case 'claim_release': return `${p.poi} is back on the market`;
+    case 'trade_offer': return p.status === 'expired' ? `${muse}'s offer to ${p.to} expired` : `${muse} offered ${p.to} ${p.amount}◦`;
+    case 'trade_accept': return `${muse} accepted ${p.from}'s ${p.amount}◦`;
+    case 'buy': return p.item === 'crier' ? `📯 ${muse}: “${p.text}”` : `${muse} bought ${p.item === 'flair' ? 'a name flair' : 'a lantern'}`;
+    case 'stamp': return `${muse} stamped turn ${p.turn} for ${p.district}`;
+    case 'settlement': return `Turn ${p.turn} settled · ${p.entry_count} entries · root ${String(p.merkle_root).slice(0, 8)}…`;
+    default: return '';
+  }
+}
 function updateHUD() {
   document.body.classList.toggle('is-night', night > .4);
   for (const m of muses) {
     const district = districtAt(m);
     m.row.classList.toggle('selected', m === followed); m.row.setAttribute('aria-pressed', String(m === followed));
     m.districtEl.textContent = district.name; m.actionEl.textContent = (m.controlled ? '⌁ ' : '') + m.action;
+    m.nameEl.textContent = m.name + (m.flair ? ' ✦ ' + m.flair : '');
+    m.shellsEl.textContent = serverLive ? `${m.shells ?? 0}◦` : '';
     m.row.setAttribute('aria-label', `${m.name}, ${district.name}, ${m.action}. ${m === followed ? 'Stop following' : 'Follow'}.`);
     const value = m.emoteTimer > 0 ? ({ wave: 'Hello, little world!', heart: 'A little love <3', sparkle: '* a bright idea *' }[m.emote]) : m.bubbleTimer > 0 && (followed === m || m.controlled) ? m.bubble : m.action;
     writeLabel(m.caption, value);
@@ -590,6 +624,11 @@ function updateHUD() {
   $('clock').textContent = `${String(Math.floor(hours)).padStart(2, '0')}:${String(Math.floor(hours % 1 * 60)).padStart(2, '0')}`;
   $('phase').textContent = hours < 5 || hours >= 21 ? 'NIGHT' : hours < 9 ? 'MORNING' : hours < 17 ? 'DAYLIGHT' : 'EVENING';
   $('mode').textContent = serverLive ? 'SHARED CITY / LIVE' : AGENT_MODE ? 'AGENT MODE / LOCAL' : 'SCRIPTED MUSES / LOCAL';
+  if (serverLive && elapsed > tickerStart) {
+    const items = [`Turn ${economy.turn}${economy.pendingTurns.length ? ` · turn ${economy.pendingTurns[0].turn} awaits a district stamp` : ' · all settled'}`];
+    for (const e of economy.recent) { const text = describeEvent(e); if (text) items.push(text); }
+    if (items.length) dispatch(items[Math.floor(elapsed / 6) % items.length]);
+  }
 }
 function save() {
   if (!world) return;

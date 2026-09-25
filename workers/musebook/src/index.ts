@@ -789,6 +789,19 @@ export default {
           return await passthrough("/action", { method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ muse: identity.muse, key_hash: keyHash, action: raw.action, params: raw.params ?? {} }) });
         }
+        for (const [route, doPath] of [["/api/city/trade", "/trade"], ["/api/city/trade/accept", "/trade/accept"], ["/api/city/buy", "/buy"], ["/api/city/stamp", "/stamp"]] as const) {
+          if (url.pathname === route && req.method === "POST") {
+            const raw = await req.json().catch(() => null) as Record<string, unknown> | null;
+            if (!raw || typeof raw.key !== "string" || raw.key.length !== 64) return json({ ok: false, reason: "Invalid key" }, 401, origin);
+            const keyHash = await sha256hex(raw.key);
+            const identity = await env.MUSEBOOK_DB.prepare("SELECT muse FROM city_keys WHERE key_hash = ? AND revoked_at IS NULL")
+              .bind(keyHash).first<{ muse: string }>();
+            if (!identity) return json({ ok: false, reason: "Invalid or revoked key" }, 401, origin);
+            const { key: _dropped, ...rest } = raw;
+            return await passthrough(doPath, { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ muse: identity.muse, key_hash: keyHash, ...rest }) });
+          }
+        }
         return json({ ok: false, reason: "Not found" }, 404, origin);
       } catch {
         return json({ ok: false, reason: "City temporarily unavailable" }, 503, origin);
