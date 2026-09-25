@@ -817,17 +817,24 @@ async function init() {
 }
 // Raycast only on pointer input. An additional screen-space radius makes small
 // voxel bodies easy to select by touch without increasing their visual size.
+// pointerup (not click) is used so event.pointerType is defined; a tap-vs-drag
+// guard keeps accidental selections from firing while scrolling the page.
 const pointer = new THREE.Vector2(), raycaster = new THREE.Raycaster(), projected = new THREE.Vector3();
-canvas.addEventListener('click', event => {
+let tapStart = null;
+canvas.addEventListener('pointerdown', event => { tapStart = { x: event.clientX, y: event.clientY }; });
+canvas.addEventListener('pointerup', event => {
   if (!world || !camera) return;
+  if (tapStart && Math.hypot(event.clientX - tapStart.x, event.clientY - tapStart.y) > 10) { tapStart = null; return; }
+  tapStart = null;
   pointer.set(event.clientX / innerWidth * 2 - 1, 1 - event.clientY / innerHeight * 2);
   raycaster.setFromCamera(pointer, camera);
   let picked = null, nearest = Infinity;
+  const touchRadius = event.pointerType === 'touch' ? 30 : 17;
   for (const m of muses) {
     const hits = raycaster.intersectObject(m.body, true);
     projected.set(m.x + .5, 1.2, m.y + .5).project(camera);
     const distance = Math.hypot((projected.x + 1) * innerWidth / 2 - event.clientX, (1 - projected.y) * innerHeight / 2 - event.clientY);
-    if ((hits.length || distance < (event.pointerType === 'touch' ? 24 : 17)) && distance < nearest) { picked = m; nearest = distance; }
+    if ((hits.length || distance < touchRadius) && distance < nearest) { picked = m; nearest = distance; }
   }
   follow(picked);
 });
