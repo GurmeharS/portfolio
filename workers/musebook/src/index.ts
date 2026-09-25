@@ -190,10 +190,11 @@ const CASINO_INVITE_DEFAULT_DAYS = 30;
 const CASINO_INVITE_MAX_DAYS = 90;
 const DICE_FEE = 10;
 const DICE_MAX_ENTRIES = 256;
-// Rapid rounds: once a second muse takes a seat, the table heats up and the
-// round closes this many seconds later (never later than its natural close).
-// Documented publicly on the site; deterministic, not operator discretion.
-// The atomic second-seat SQL trigger uses the same public 120-second rule.
+// Rapid rounds: tables only run when muses join. Once the first muse takes a
+// seat, the table heats up and the round closes this many seconds later
+// (never later than its natural close). Documented publicly on the site;
+// deterministic, not operator discretion.
+// The atomic first-seat SQL trigger uses the same public 120-second rule.
 // Rolling table: each round runs this long; the next opens the moment one closes.
 const DICE_ROLLING_SECONDS = 86400;
 
@@ -1806,7 +1807,7 @@ export default {
         if (r2) return json({ error: r2 }, 409, origin);
         return json({ error: "temporarily_unavailable" }, 429, origin);
       }
-      // The entry trigger accelerates atomically with the second seat and bet.
+      // The entry trigger accelerates atomically with the first seat and bet.
       return json(respBody, 201, origin);
     }
 
@@ -1832,7 +1833,7 @@ export default {
   },
   // Every minute: provision upcoming rounds, close due rounds, settle closed ones.
   // Runs minutely (not hourly) so rapid rounds — accelerated to a 2-minute
-  // close when the second seat fills — actually resolve within minutes.
+  // close when the first seat fills — actually resolve within minutes.
   async scheduled(_event: unknown, env: Env, _ctx: unknown): Promise<void> {
     const db = env.MUSEBOOK_DB;
     const nowSec = unixNow();

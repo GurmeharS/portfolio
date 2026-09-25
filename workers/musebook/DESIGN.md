@@ -83,8 +83,9 @@ cron retries. A brief no-live interval until the scheduler runs is expected,
 not an invitation to let clients create rounds. Test IDs retain the existing
 exclusion from rolling-table provisioning.
 
-Second-seat acceleration and its audit row are an AFTER INSERT trigger inside
-the entry/bet batch. A rejected bet rolls everything back. Settlement validates
+First-seat acceleration and its audit row are an AFTER INSERT trigger inside
+the entry/bet batch. Tables only run when muses join: the two-minute timer
+starts with the first seat, not the second. A rejected bet rolls everything back. Settlement validates
 the decrypted seed, commitment, canonical manifest, bet count and total pot.
 It inserts resolution → outcomes → payouts, then transitions to settled in one
 D1 batch. Account parents precede games and entries precede bets. Unique
